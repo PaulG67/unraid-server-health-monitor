@@ -1,0 +1,99 @@
+#############################
+# Unraid Server Health Monitor
+# config.conf – fertige Vorlage
+#
+# Anleitung:
+# 1) Diese Datei nach der Installation hier ablegen bzw. ersetzen:
+#    /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/config/config.conf
+# 2) Nur die mit >>> markierten Zeilen ausfüllen
+# 3) Testlauf mit --dry-run
+#############################
+
+# Unraid-Standardpfade (meist unverändert lassen)
+CACHE_PATH=/mnt/cache
+APPDATA_PATH=/mnt/user/appdata
+DOCKER_PATH=/var/lib/docker
+DATA_DIR=
+
+# Top-N AppData-Ordner im Report
+TOP_N=20
+
+#############################
+# Mail (SMTP)
+#############################
+
+# >>> auf true setzen, wenn du HTML-Mails willst
+MAIL_ENABLED=false
+
+# >>> dein SMTP-Server, z.B. smtp.gmail.com / smtp.office365.com / smtp.ionos.de
+SMTP_SERVER=
+SMTP_PORT=587
+
+# >>> SMTP-Login
+SMTP_USER=
+SMTP_PASS=
+
+SMTP_TLS=true
+
+# >>> Absender / Empfänger (darf bei vielen Providern = SMTP_USER sein)
+MAIL_FROM=
+MAIL_TO=
+
+# wann mailen: warn | crit | always | daily
+MAIL_ON=warn
+
+#############################
+# Pushover
+#############################
+
+# >>> auf true setzen, wenn Pushover genutzt wird
+PUSHOVER_ENABLED=false
+
+# >>> aus dem Pushover-Dashboard (Application Token + User Key)
+PUSHOVER_TOKEN=
+PUSHOVER_USER=
+
+# auch ohne Alarm einen Daily-Report senden
+PUSHOVER_DAILY=true
+
+#############################
+# Schwellwerte
+# (an Homeserver mit Immich/Plex/Paperless angepasst)
+#############################
+
+# Cache SSD: Alarm wenn FREIER Speicher darunter fällt
+CACHE_WARN=20
+CACHE_CRIT=10
+
+# Docker Image: Alarm wenn BELEGUNG darüber steigt
+DOCKER_WARN=70
+DOCKER_CRIT=90
+
+# Einzelnes AppData-Wachstum seit letztem Lauf (MB)
+# Immich/Plex können stark wachsen – bewusst etwas großzügig
+APP_WARN_MB=500
+APP_CRIT_MB=2000
+
+# Summe aller Container-Logs (MB)
+LOG_WARN_MB=500
+LOG_CRIT_MB=2000
+
+# Writable Layer % vom Docker-Speicher (0 = aus)
+DOCKER_LAYER_WARN=0
+DOCKER_LAYER_CRIT=0
+
+# SMART (ab v2.0 – schon vorbereitet)
+SMART_WARN=55
+SMART_CRIT=65
+SSD_LIFE_WARN=20
+SSD_LIFE_CRIT=10
+
+#############################
+# Verhalten
+#############################
+
+# true = Report erzeugen, aber KEINE Mail/Pushover
+DRY_RUN=false
+
+# debug | info | warn | error
+LOG_LEVEL=info
