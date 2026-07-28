@@ -71,7 +71,8 @@ ushm_check_growth() {
     name="${GROWTH_NAMES[$i]}"
     # Top 8 oder Änderung >= 1 MB
     if (( i < 8 || delta >= 1048576 || delta <= -1048576 )); then
-      GROWTH_TOP+="$(printf '%-20s %s\n' "$name" "$(ushm_format_delta "$delta")")"
+      GROWTH_TOP+="$(printf '%-20s %s' "$name" "$(ushm_format_delta "$delta")")"
+      GROWTH_TOP+=$'\n'
     fi
   done
 
