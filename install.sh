@@ -48,12 +48,19 @@ else
   echo "→ bestehende config.conf belassen"
 fi
 
-# User Scripts erwartet oft eine Datei namens "script"
-cat >"$TARGET/script" <<'EOF'
+# User Scripts kopiert nur "script" nach /tmp/... – daher absoluter Pfad nötig
+cat >"$TARGET/script" <<EOF
 #!/bin/bash
 # User Scripts Wrapper für Unraid Server Health Monitor
-DIR="$(dirname "$(readlink -f "$0")")"
-exec bash "${DIR}/ushm.sh" "$@"
+# Wichtig: immer /boot-Pfad nutzen (User Scripts läuft aus /tmp-Kopie)
+USHM="${TARGET}"
+
+if [[ ! -f "\${USHM}/ushm.sh" ]]; then
+  echo "USHM nicht gefunden unter \${USHM}"
+  exit 1
+fi
+
+exec bash "\${USHM}/ushm.sh" "\$@"
 EOF
 chmod +x "$TARGET/script"
 chmod +x "$TARGET/ushm.sh"

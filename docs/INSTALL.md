@@ -277,6 +277,7 @@ Beim **ersten** Lauf gibt es noch kein Wachstum – ab dem **zweiten** Lauf ersc
 | SMTP `TimeoutError` | Host/Port falsch, Firewall, Port 587 prüfen: `nc -vz smtp.example.com 587` |
 | Keine Mail trotz OK-Status | `MAIL_ON=warn` sendet nur bei Warnung/Crit – Test mit `--test-notify` oder `MAIL_ON=always` |
 | Script in User Scripts leer | Installer ausführen oder Wrapper von Abschnitt 4 einfügen |
+| `ushm.sh: No such file or directory` unter `/tmp/user.scripts/...` | User Scripts kopiert nur `script` nach `/tmp`. Wrapper muss den **absoluten** Pfad unter `/boot/config/...` aufrufen (Installer ab Fix 2026-07-28). Sofort-Fix: Inhalt von Abschnitt 4 in das Script einfügen |
 | Config nach Update weg? | sollte nicht passieren – `install.sh` lässt `config.conf` bestehen |
 
 ---
