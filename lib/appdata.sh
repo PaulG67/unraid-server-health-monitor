@@ -2,9 +2,6 @@
 # AppData Top-N Verzeichnisse
 # shellcheck disable=SC2034
 
-# APPDATA_OK APPDATA_TOTAL_BYTES APPDATA_TOP (Name\tBytes Zeilen)
-# APPDATA_NAMES[] APPDATA_SIZES[] parallel arrays
-
 ushm_check_appdata() {
   APPDATA_OK=0
   APPDATA_TOTAL_BYTES=0
@@ -15,6 +12,7 @@ ushm_check_appdata() {
   local path="${APPDATA_PATH:-/mnt/user/appdata}"
   local n="${TOP_N:-20}"
   ushm_info "Prüfe AppData: $path (Top $n)"
+  ushm_info "  → scanne Verzeichnisse (kann bei großen Apps 1–5 Min dauern)…"
 
   if [[ ! -d "$path" ]]; then
     ushm_add_alert 2 "AppData" "AppData-Pfad nicht gefunden: $path"
@@ -22,40 +20,68 @@ ushm_check_appdata() {
   fi
 
   APPDATA_OK=1
-  APPDATA_TOTAL_BYTES=$(ushm_dir_size_bytes "$path")
 
-  # Kinder-Verzeichnisse nach Größe sortieren
+  # Ein einziger Tiefen-1-Scan statt je Ordner einzeln
   local tmp
   tmp=$(mktemp)
-  local d
-  shopt -s nullglob
-  for d in "$path"/*/; do
-    [[ -d "$d" ]] || continue
-    local sz name
-    sz=$(ushm_dir_size_bytes "$d")
-    name=$(basename "$d")
-    printf '%s\t%s\n' "$sz" "$name" >>"$tmp"
-  done
-  shopt -u nullglob
+  local du_ok=0
+  if du -d1 -b "$path" 2>/dev/null | sort -nr >"$tmp"; then
+    du_ok=1
+  elif du --max-depth=1 -b "$path" 2>/dev/null | sort -nr >"$tmp"; then
+    du_ok=1
+  fi
 
-  # Auch Dateien direkt in appdata (selten)
-  # sortiert Top N
-  local line sz name i=0
+  if (( du_ok == 1 )) && [[ -s "$tmp" ]]; then
+    local converted bytes p name
+    converted=$(mktemp)
+    while read -r bytes p; do
+      [[ -z "$bytes" || -z "$p" ]] && continue
+      [[ "$bytes" =~ ^[0-9]+$ ]] || continue
+      if [[ "$p" == "$path" || "$p" == "${path%/}" ]]; then
+        APPDATA_TOTAL_BYTES="$bytes"
+        continue
+      fi
+      name=$(basename "$p")
+      printf '%s\t%s\n' "$bytes" "$name" >>"$converted"
+    done <"$tmp"
+    mv -f "$converted" "$tmp"
+  else
+    ushm_warn "du -d1 nicht verfügbar – Fallback (langsamer)"
+    : >"$tmp"
+    local d
+    shopt -s nullglob
+    for d in "$path"/*/; do
+      [[ -d "$d" ]] || continue
+      local sz name
+      name=$(basename "$d")
+      ushm_info "  → messe $name …"
+      sz=$(ushm_dir_size_bytes "$d")
+      printf '%s\t%s\n' "$sz" "$name" >>"$tmp"
+    done
+    shopt -u nullglob
+    sort -nr -o "$tmp" "$tmp"
+  fi
+
+  # Falls Total nicht aus Parent-Zeile kam: Summe der Kinder
+  if [[ "${APPDATA_TOTAL_BYTES:-0}" -eq 0 ]]; then
+    APPDATA_TOTAL_BYTES=$(awk -F'\t' '{s+=$1} END{print s+0}' "$tmp")
+  fi
+
+  local sz name i=0
   while IFS=$'\t' read -r sz name; do
+    [[ -z "$name" ]] && continue
     (( i++ > n )) && break
     APPDATA_NAMES+=("$name")
     APPDATA_SIZES+=("$sz")
-  done < <(sort -nr "$tmp")
+  done <"$tmp"
 
   rm -f "$tmp"
 
-  # Textblock für Report
   APPDATA_TOP=""
-  local i
   for i in "${!APPDATA_NAMES[@]}"; do
     APPDATA_TOP+="$(printf '%-20s %10s\n' "${APPDATA_NAMES[$i]}" "$(ushm_bytes_human "${APPDATA_SIZES[$i]}")")"
   done
 
-  ushm_debug "AppData gesamt: $(ushm_bytes_human "$APPDATA_TOTAL_BYTES"), ${#APPDATA_NAMES[@]} Einträge"
+  ushm_info "AppData fertig: $(ushm_bytes_human "$APPDATA_TOTAL_BYTES"), ${#APPDATA_NAMES[@]} Einträge"
   return 0
 }

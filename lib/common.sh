@@ -39,7 +39,8 @@ ushm_log() {
     error) [[ "$level" != "error" ]] && return 0 ;;
   esac
 
-  printf '[%s] %-5s %s\n' "$ts" "${level^^}" "$msg"
+  # Sofort ausgeben (wichtig bei langen du-Scans)
+  printf '[%s] %-5s %s\n' "$ts" "${level^^}" "$msg" >&2
 }
 
 ushm_debug() { ushm_log debug "$*"; }

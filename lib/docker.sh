@@ -53,14 +53,24 @@ ushm_check_docker() {
     ushm_add_alert 1 "Docker" "Docker-Image ${DOCKER_PCT}% belegt – Warnung ≥${DOCKER_WARN}%"
   fi
 
-  # Writable Layer (overlay2 / btrfs)
+  # Writable Layer nur scannen wenn Schwellwert aktiv (sonst sehr langsam!)
   ushm_docker_writable_layer
+  ushm_info "  → prüfe Container-Logs…"
   ushm_docker_logs
+  ushm_info "Docker-Check fertig (${DOCKER_PCT}% belegt)"
 
   return 0
 }
 
 ushm_docker_writable_layer() {
+  DOCKER_LAYER_BYTES=0
+
+  # Teurer du auf overlay2 – nur wenn gewünscht
+  if (( ${DOCKER_LAYER_WARN:-0} <= 0 && ${DOCKER_LAYER_CRIT:-0} <= 0 )); then
+    ushm_debug "Writable-Layer-Scan übersprungen (DOCKER_LAYER_WARN/CRIT=0)"
+    return 0
+  fi
+
   local path="${DOCKER_PATH:-/var/lib/docker}"
   local candidates=(
     "${path}/overlay2"
@@ -68,16 +78,16 @@ ushm_docker_writable_layer() {
     "${path}/vfs"
   )
   local c
-  DOCKER_LAYER_BYTES=0
   for c in "${candidates[@]}"; do
     if [[ -d "$c" ]]; then
+      ushm_info "  → messe Writable Layer ($c) – kann dauern…"
       DOCKER_LAYER_BYTES=$(ushm_dir_size_bytes "$c")
       ushm_debug "Writable Layer ($c): $(ushm_bytes_human "$DOCKER_LAYER_BYTES")"
       break
     fi
   done
 
-  if (( DOCKER_LAYER_WARN > 0 || DOCKER_LAYER_CRIT > 0 )) && (( DOCKER_TOTAL > 0 )); then
+  if (( DOCKER_TOTAL > 0 )); then
     local layer_pct=$(( DOCKER_LAYER_BYTES * 100 / DOCKER_TOTAL ))
     if (( DOCKER_LAYER_CRIT > 0 && layer_pct >= DOCKER_LAYER_CRIT )); then
       ushm_add_alert 2 "Docker Layer" "Writable Layer ${layer_pct}% des Docker-Speichers – kritisch ≥${DOCKER_LAYER_CRIT}%"
@@ -98,7 +108,7 @@ ushm_docker_logs() {
     return 0
   fi
 
-  # Gesamtgröße aller *-json.log
+  # Gesamtgröße aller *-json.log (nur Dateigrößen, kein rekursives du)
   local sum
   sum=$(find "$log_root" -type f -name '*-json.log' -printf '%s\n' 2>/dev/null | awk '{s+=$1} END {print s+0}')
   DOCKER_LOG_BYTES=${sum:-0}

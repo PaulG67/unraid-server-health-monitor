@@ -85,9 +85,13 @@ ushm_run() {
   ushm_load_config
 
   # Checks (Reihenfolge wichtig: AppData vor Growth)
+  ushm_info "[1/5] Cache…"
   ushm_check_cache || true
+  ushm_info "[2/5] Docker…"
   ushm_check_docker || true
+  ushm_info "[3/5] AppData…"
   ushm_check_appdata || true
+  ushm_info "[4/5] Wachstum…"
   ushm_check_growth || true
 
   # Optionale Module
@@ -98,6 +102,7 @@ ushm_run() {
     ushm_check_array || true
   fi
 
+  ushm_info "[5/5] Historie + Report…"
   ushm_history_write
   echo
   ushm_print_dashboard
@@ -110,12 +115,18 @@ ushm_run() {
   ushm_dispatch_alerts
 
   ushm_info "=== USHM fertig (Status: $(ushm_severity_label)) ==="
-  return "$USHM_SEVERITY"
+  # Exit-Code bewusst setzen, ohne set -e auszulösen
+  return 0
+}
+
+ushm_exit_with_severity() {
+  exit "$USHM_SEVERITY"
 }
 
 main() {
   ushm_parse_args "$@"
   ushm_run
+  ushm_exit_with_severity
 }
 
 main "$@"

@@ -41,7 +41,7 @@ ushm_send_pushover() {
   ushm_info "Sende Pushover: $title (prio=$priority)"
 
   local resp
-  resp=$(curl -sS \
+  resp=$(curl -sS --connect-timeout 10 --max-time 30 \
     --form-string "token=${PUSHOVER_TOKEN}" \
     --form-string "user=${PUSHOVER_USER}" \
     --form-string "title=${title}" \
