@@ -30,7 +30,11 @@ ushm_dispatch_alerts() {
   if ushm_should_notify_mail; then
     ushm_send_mail || ushm_error "Mail-Versand fehlgeschlagen"
   else
-    ushm_debug "Mail nicht gesendet (disabled oder unter Schwellwert)"
+    if ushm_is_true "$MAIL_ENABLED"; then
+      ushm_info "Mail übersprungen (Status=$(ushm_severity_label), MAIL_ON=${MAIL_ON} – bei OK z.B. MAIL_ON=daily setzen)"
+    else
+      ushm_debug "Mail nicht gesendet (MAIL_ENABLED=false)"
+    fi
   fi
 
   if ushm_should_notify_pushover; then

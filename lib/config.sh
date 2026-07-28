@@ -16,7 +16,7 @@ ushm_config_defaults() {
   SMTP_TLS="${SMTP_TLS:-true}"
   MAIL_FROM="${MAIL_FROM:-}"
   MAIL_TO="${MAIL_TO:-}"
-  MAIL_ON="${MAIL_ON:-warn}"
+  MAIL_ON="${MAIL_ON:-daily}"
 
   PUSHOVER_ENABLED="${PUSHOVER_ENABLED:-false}"
   PUSHOVER_TOKEN="${PUSHOVER_TOKEN:-}"

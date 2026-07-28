@@ -25,7 +25,8 @@ SMTP_TLS=true
 MAIL_FROM=
 MAIL_TO=
 # daily | warn | crit | always
-MAIL_ON=warn
+# daily = auch bei OK (empfohlen, analog Pushover Daily)
+MAIL_ON=daily
 
 #############################
 # Pushover

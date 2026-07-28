@@ -40,7 +40,8 @@ MAIL_FROM=
 MAIL_TO=
 
 # wann mailen: warn | crit | always | daily
-MAIL_ON=warn
+# daily = auch bei OK eine Mail (empfohlen, analog zu Pushover Daily)
+MAIL_ON=daily
 
 #############################
 # Pushover

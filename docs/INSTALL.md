@@ -128,7 +128,9 @@ Hinweise:
 - Port **587** + `SMTP_TLS=true` (STARTTLS) ist der Standardweg
 - `MAIL_FROM` oft = `SMTP_USER`
 - Gmail/Google: App-Passwort verwenden
-- `MAIL_ON`: `warn` | `crit` | `always` | `daily`
+- `MAIL_ON`: `warn` | `crit` | `always` | `daily`  
+  - `warn` (früher Default): Mail **nur** bei Warnung/Kritisch  
+  - `daily` / `always`: Mail auch bei Status OK (wie Pushover Daily Report)
 
 ### 2.3 Schwellwerte (Defaults)
 

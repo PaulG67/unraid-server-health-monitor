@@ -79,7 +79,9 @@ ushm_check_appdata() {
 
   APPDATA_TOP=""
   for i in "${!APPDATA_NAMES[@]}"; do
-    APPDATA_TOP+="$(printf '%-20s %10s\n' "${APPDATA_NAMES[$i]}" "$(ushm_bytes_human "${APPDATA_SIZES[$i]}")")"
+    # Wichtig: $() frisst trailing \\n – daher explizit anhängen
+    APPDATA_TOP+="$(printf '%-20s %10s' "${APPDATA_NAMES[$i]}" "$(ushm_bytes_human "${APPDATA_SIZES[$i]}")")"
+    APPDATA_TOP+=$'\n'
   done
 
   ushm_info "AppData fertig: $(ushm_bytes_human "$APPDATA_TOTAL_BYTES"), ${#APPDATA_NAMES[@]} Einträge"
