@@ -36,6 +36,8 @@ source "${USHM_HOME}/lib/pushover.sh"
 [[ -f "${USHM_HOME}/modules/array.sh" ]] && source "${USHM_HOME}/modules/array.sh"
 [[ -f "${USHM_HOME}/modules/dashboard.sh" ]] && source "${USHM_HOME}/modules/dashboard.sh"
 
+USHM_MODE=run
+
 ushm_usage() {
   cat <<EOF
 Unraid Server Health Monitor (USHM) v$(cat "${USHM_HOME}/VERSION" 2>/dev/null || echo "?")
@@ -45,6 +47,7 @@ Usage: $(basename "$0") [options]
 Options:
   -c, --config PATH   Pfad zur config.conf
   -n, --dry-run       Keine Mails/Pushover senden
+  -t, --test-notify   Nur Mail + Pushover aus der Config testen
   -q, --quiet         Weniger Log-Ausgabe (LOG_LEVEL=warn)
   -h, --help          Diese Hilfe
 
@@ -63,6 +66,10 @@ ushm_parse_args() {
         export DRY_RUN=true
         shift
         ;;
+      -t|--test-notify)
+        USHM_MODE=test-notify
+        shift
+        ;;
       -q|--quiet)
         export LOG_LEVEL=warn
         shift
@@ -78,6 +85,77 @@ ushm_parse_args() {
         ;;
     esac
   done
+}
+
+ushm_test_notify() {
+  ushm_info "=== USHM Notify-Test ==="
+  ushm_load_config
+  DRY_RUN=false
+
+  # Minimale Report-Daten, damit Templates nicht leer knallen
+  CACHE_BAR="$(ushm_pct_bar 0)"
+  CACHE_PCT_USED=0
+  CACHE_PCT_FREE=100
+  CACHE_AVAIL=0
+  DOCKER_BAR="$(ushm_pct_bar 0)"
+  DOCKER_PCT=0
+  DOCKER_MODE="test"
+  DOCKER_USED=0
+  DOCKER_TOTAL=0
+  DOCKER_LAYER_BYTES=0
+  DOCKER_LOG_BYTES=0
+  APPDATA_TOTAL_BYTES=0
+  APPDATA_TOP="(Notify-Test – kein Scan)"
+  GROWTH_TOP="(Notify-Test – kein Scan)"
+  APPDATA_NAMES=()
+  APPDATA_SIZES=()
+  GROWTH_NAMES=()
+  GROWTH_DELTAS=()
+  USHM_SEVERITY=0
+  USHM_ALERTS=()
+  ushm_add_alert 1 "Test" "Dies ist ein USHM Notify-Test. Wenn du das siehst, funktioniert der Versand."
+
+  local rc=0
+
+  echo
+  ushm_info "--- Mail ---"
+  if ! ushm_is_true "$MAIL_ENABLED"; then
+    ushm_warn "MAIL_ENABLED=false – Mail-Test übersprungen"
+  elif [[ -z "${SMTP_SERVER:-}" || -z "${MAIL_FROM:-}" || -z "${MAIL_TO:-}" ]]; then
+    ushm_error "Mail-Config unvollständig (SMTP_SERVER / MAIL_FROM / MAIL_TO)"
+    rc=1
+  else
+    if ushm_send_mail; then
+      ushm_info "Mail-Test OK → ${MAIL_TO}"
+    else
+      ushm_error "Mail-Test FEHLGESCHLAGEN"
+      rc=1
+    fi
+  fi
+
+  echo
+  ushm_info "--- Pushover ---"
+  if ! ushm_is_true "$PUSHOVER_ENABLED"; then
+    ushm_warn "PUSHOVER_ENABLED=false – Pushover-Test übersprungen"
+  elif [[ -z "${PUSHOVER_TOKEN:-}" || -z "${PUSHOVER_USER:-}" ]]; then
+    ushm_error "Pushover-Config unvollständig (TOKEN / USER)"
+    rc=1
+  else
+    if ushm_send_pushover; then
+      ushm_info "Pushover-Test OK"
+    else
+      ushm_error "Pushover-Test FEHLGESCHLAGEN"
+      rc=1
+    fi
+  fi
+
+  echo
+  if (( rc == 0 )); then
+    ushm_info "=== Notify-Test fertig ==="
+  else
+    ushm_error "=== Notify-Test mit Fehlern ==="
+  fi
+  exit "$rc"
 }
 
 ushm_run() {
@@ -125,8 +203,13 @@ ushm_exit_with_severity() {
 
 main() {
   ushm_parse_args "$@"
-  ushm_run
-  ushm_exit_with_severity
+  case "${USHM_MODE}" in
+    test-notify) ushm_test_notify ;;
+    *)
+      ushm_run
+      ushm_exit_with_severity
+      ;;
+  esac
 }
 
 main "$@"
