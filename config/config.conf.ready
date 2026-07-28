@@ -34,6 +34,10 @@ SMTP_USER=
 SMTP_PASS=
 
 SMTP_TLS=true
+# Port 465: SMTP_SSL=true setzen
+SMTP_SSL=false
+SMTP_TIMEOUT=60
+SMTP_RETRIES=3
 
 # >>> Absender / Empfänger (darf bei vielen Providern = SMTP_USER sein)
 MAIL_FROM=

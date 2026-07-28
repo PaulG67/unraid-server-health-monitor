@@ -276,7 +276,7 @@ Beim **ersten** Lauf gibt es noch kein Wachstum – ab dem **zweiten** Lauf ersc
 |---------|------------------|
 | Script „hängt“ ohne Ausgabe | oft langer AppData-Scan – aktualisieren (Fortschrittslogs) und warten |
 | `application token is invalid` | `PUSHOVER_TOKEN` / `PUSHOVER_USER` vertauscht |
-| SMTP `TimeoutError` | Host/Port falsch, Firewall, Port 587 prüfen: `nc -vz smtp.example.com 587` |
+| SMTP `TimeoutError` | Host/Port prüfen: `nc -vz smtp.example.com 587`. Bei Port **465** in der Config `SMTP_SSL=true` setzen. Unraid neu versuchen oder `SMTP_RETRIES=3` / `SMTP_TIMEOUT=60`. Manche Provider sind nach langen Scans langsam – USHM retried automatisch. |
 | Keine Mail trotz OK-Status | `MAIL_ON=warn` sendet nur bei Warnung/Crit – Test mit `--test-notify` oder `MAIL_ON=always` |
 | Script in User Scripts leer | Installer ausführen oder Wrapper von Abschnitt 4 einfügen |
 | `ushm.sh: No such file or directory` unter `/tmp/user.scripts/...` | User Scripts kopiert nur `script` nach `/tmp`. Wrapper muss den **absoluten** Pfad unter `/boot/config/...` aufrufen (Installer ab Fix 2026-07-28). Sofort-Fix: Inhalt von Abschnitt 4 in das Script einfügen |
