@@ -1,0 +1,8 @@
+# Unraid Server Health Monitor
+data/
+*.log
+config/config.conf
+.DS_Store
+Thumbs.db
+*.swp
+*~

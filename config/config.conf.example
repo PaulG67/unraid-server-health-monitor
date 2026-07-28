@@ -1,0 +1,80 @@
+#############################
+# Unraid Server Health Monitor
+# config.conf
+#############################
+
+# Pfade (Unraid-Defaults – nur ändern wenn nötig)
+CACHE_PATH=/mnt/cache
+APPDATA_PATH=/mnt/user/appdata
+DOCKER_PATH=/var/lib/docker
+DATA_DIR=
+
+# Anzahl Top-Verzeichnisse im Report
+TOP_N=20
+
+#############################
+# Mail
+#############################
+
+MAIL_ENABLED=false
+SMTP_SERVER=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+SMTP_TLS=true
+MAIL_FROM=
+MAIL_TO=
+# daily | warn | crit | always
+MAIL_ON=warn
+
+#############################
+# Pushover
+#############################
+
+PUSHOVER_ENABLED=false
+PUSHOVER_TOKEN=
+PUSHOVER_USER=
+# Daily Report auch ohne Alarm senden
+PUSHOVER_DAILY=true
+
+#############################
+# Schwellwerte
+#############################
+
+# Cache SSD: freier Speicher in Prozent (Warnung/Kritisch wenn darunter)
+CACHE_WARN=20
+CACHE_CRIT=10
+
+# Docker Image: Belegung in Prozent (Warnung/Kritisch wenn darüber)
+DOCKER_WARN=70
+DOCKER_CRIT=90
+
+# AppData-Wachstum seit letztem Lauf in MB
+APP_WARN_MB=500
+APP_CRIT_MB=2000
+
+# Container-Logs Gesamtgröße in MB
+LOG_WARN_MB=500
+LOG_CRIT_MB=2000
+
+# Docker Writable Layer Belegung in Prozent (0 = deaktiviert)
+DOCKER_LAYER_WARN=0
+DOCKER_LAYER_CRIT=0
+
+# SMART Temperatur in °C (v2.0 – schon konfigurierbar)
+SMART_WARN=55
+SMART_CRIT=65
+
+# SSD Remaining Life in Prozent (v2.0)
+SSD_LIFE_WARN=20
+SSD_LIFE_CRIT=10
+
+#############################
+# Verhalten
+#############################
+
+# true = nur Report, keine Alarme/Mails/Pushover
+DRY_RUN=false
+
+# Log-Level: debug | info | warn | error
+LOG_LEVEL=info
