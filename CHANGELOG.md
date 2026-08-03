@@ -2,6 +2,14 @@
 
 Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 
+## [1.0.4] – 2026-08-03
+
+### Fixed
+
+- Cache-Pfad **case-insensitive** (`/mnt/Cacheintern` → `/mnt/cacheintern`); vermeidet „0 frei von 0“.
+- Messung primär über Mount/`df`/`btrfs` (wie `df -hT`), Fallback `disks.ini`.
+- Expliziter `CACHE_PATH` hat Vorrang vor automatischer Pool-Wahl.
+
 ## [1.0.3] – 2026-08-03
 
 ### Fixed

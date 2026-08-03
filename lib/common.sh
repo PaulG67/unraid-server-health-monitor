@@ -175,14 +175,15 @@ ushm_dir_size_bytes() {
 # ---------------------------------------------------------------------------
 ushm_unraid_ini_get() {
   # $1=ini-file $2=section $3=key → Wert ohne Anführungszeichen
+  # Section-Vergleich case-insensitive (Config oft /mnt/Cacheintern, Mount /mnt/cacheintern)
   local file="$1" section="$2" key="$3"
   [[ -f "$file" ]] || return 1
   awk -F= -v sec="$section" -v key="$key" '
-    BEGIN { insec=0 }
+    BEGIN { insec=0; secl=tolower(sec) }
     /^\[/ {
       s=$0
       gsub(/^\[|\]$/, "", s)
-      insec = (s == sec)
+      insec = (tolower(s) == secl)
       next
     }
     insec && $1 == key {
@@ -195,6 +196,55 @@ ushm_unraid_ini_get() {
       exit
     }
   ' "$file"
+}
+
+# Löst einen Pool-Namen/Path case-insensitive gegen /mnt/* auf.
+# Gibt echten Mount-Pfad aus (z.B. /mnt/cacheintern), return 0 bei Treffer.
+ushm_find_mnt_casefold() {
+  local want="$1"
+  local base want_l n n_l
+  [[ -n "$want" ]] || return 1
+  base=$(basename "$want")
+  want_l=$(printf '%s' "$base" | tr '[:upper:]' '[:lower:]')
+
+  if [[ -d "/mnt/$base" ]]; then
+    echo "/mnt/$base"
+    return 0
+  fi
+  if [[ "$want" == /* && -d "$want" ]]; then
+    echo "$want"
+    return 0
+  fi
+
+  local d
+  for d in /mnt/*/; do
+    [[ -d "$d" ]] || continue
+    n=$(basename "$d")
+    case "$n" in
+      user|disks|remotes|addons|rootshare|disk[0-9]*) continue ;;
+    esac
+    n_l=$(printf '%s' "$n" | tr '[:upper:]' '[:lower:]')
+    if [[ "$n_l" == "$want_l" ]]; then
+      echo "/mnt/$n"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Liefert den echten Section-Namen aus disks.ini (korrektes Casing), case-insensitive Suche.
+ushm_unraid_find_section() {
+  local want="$1"
+  local ini="${2:-/var/local/emhttp/disks.ini}"
+  [[ -f "$ini" && -n "$want" ]] || return 1
+  awk -v want="$want" '
+    BEGIN { wl=tolower(want) }
+    /^\[/ {
+      s=$0
+      gsub(/^\[|\]$/, "", s)
+      if (tolower(s) == wl) { print s; exit 0 }
+    }
+  ' "$ini"
 }
 
 # Unraid speichert fsSize/fsFree/fsUsed in KiB (WebGUI multipliziert mit 1024).
@@ -287,37 +337,39 @@ ushm_unraid_pick_cache_pool() {
   list=$(ushm_unraid_list_cache_pools "$ini" 2>/dev/null) || true
   [[ -n "$list" ]] || return 1
 
-  local largest_name="" largest_size=0 name size prefer_size=""
+  local largest_name="" largest_size=0 name size prefer_size="" prefer_name="" prefer_l
+  prefer_l=$(printf '%s' "$prefer" | tr '[:upper:]' '[:lower:]')
+
   while IFS=$'\t' read -r name size; do
     [[ -z "$name" ]] && continue
     if [[ -z "$largest_name" ]]; then
       largest_name="$name"
       largest_size="${size:-0}"
     fi
-    if [[ -n "$prefer" && "$name" == "$prefer" ]]; then
+    if [[ -n "$prefer" && "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')" == "$prefer_l" ]]; then
       prefer_size="${size:-0}"
+      prefer_name="$name"
     fi
   done <<<"$list"
 
   [[ -n "$largest_name" ]] || return 1
 
-  # Bevorzugter Pool (CACHE_PATH), sofern er nicht deutlich kleiner als der größte ist
-  if [[ -n "$prefer" && -n "$prefer_size" ]]; then
-    # prefer_size / largest_size in KiB; wenn Prefer < 50% vom Größten → oft falscher Rest-Pool
+  # Expliziter CACHE_PATH-Treffer (case-insensitive) → echten Section-Namen nutzen
+  if [[ -n "$prefer_name" ]]; then
     if (( largest_size <= 0 || prefer_size * 2 >= largest_size )); then
-      echo "$prefer"
+      echo "$prefer_name"
       return 0
     fi
-    ushm_warn "Cache-Pool '$prefer' ist klein gegenüber '$largest_name' – nutze '$largest_name' (WebGUI-Größe)"
+    ushm_warn "Cache-Pool '$prefer_name' ist klein gegenüber '$largest_name' – nutze '$largest_name' (WebGUI-Größe)"
     echo "$largest_name"
     return 0
   fi
 
   # Fallback: „cache“ wenn vorhanden und nicht winzig
   while IFS=$'\t' read -r name size; do
-    if [[ "$name" == "cache" ]]; then
+    if [[ "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')" == "cache" ]]; then
       if (( largest_size <= 0 || size * 2 >= largest_size )); then
-        echo "cache"
+        echo "$name"
         return 0
       fi
       break

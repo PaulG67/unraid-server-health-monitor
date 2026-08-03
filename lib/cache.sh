@@ -6,20 +6,41 @@
 # CACHE_OK CACHE_TOTAL CACHE_USED CACHE_AVAIL CACHE_PCT_USED CACHE_PCT_FREE CACHE_BAR
 # CACHE_POOL_NAME CACHE_PATH_RESOLVED
 
-# Löst den echten Unraid-Cache-Pool auf (Name wie im Main-Tab).
-# Viele Setups haben z.B. /mnt/cache klein, während der große Pool anders heißt.
+# Löst CACHE_PATH auf den echten Mount unter /mnt (case-insensitive).
+# Linux: /mnt/Cacheintern ≠ /mnt/cacheintern → 0 von 0, wenn Schreibweise falsch.
 ushm_resolve_cache_path() {
   local path="${1:-${CACHE_PATH:-/mnt/cache}}"
-  local prefer
+  local prefer fixed pool sec
   prefer=$(basename "$path")
 
+  # 1) Vorhandener Mount (case-insensitive) – zuverlässigste Quelle wie df
+  if fixed=$(ushm_find_mnt_casefold "$path" 2>/dev/null); then
+    CACHE_POOL_NAME=$(basename "$fixed")
+    if [[ "$path" != "$fixed" ]]; then
+      ushm_warn "CACHE_PATH=$path → $fixed (Linux: Groß/Kleinschreibung)"
+    fi
+    echo "$fixed"
+    return 0
+  fi
+
+  # 2) disks.ini: Section/Name case-insensitive
   if [[ -f /var/local/emhttp/disks.ini ]]; then
-    local pool
-    if pool=$(ushm_unraid_pick_cache_pool "$prefer" 2>/dev/null); then
-      if [[ "$prefer" != "$pool" ]]; then
-        ushm_warn "CACHE_PATH=$path → Pool '$pool' (wie Unraid Main / disks.ini)"
+    if sec=$(ushm_unraid_find_section "$prefer" 2>/dev/null); then
+      CACHE_POOL_NAME="$sec"
+      if fixed=$(ushm_find_mnt_casefold "/mnt/$sec" 2>/dev/null); then
+        echo "$fixed"
+        return 0
       fi
+      echo "/mnt/$sec"
+      return 0
+    fi
+    if pool=$(ushm_unraid_pick_cache_pool "$prefer" 2>/dev/null); then
+      ushm_warn "CACHE_PATH=$path → Pool '$pool' (disks.ini)"
       CACHE_POOL_NAME="$pool"
+      if fixed=$(ushm_find_mnt_casefold "/mnt/$pool" 2>/dev/null); then
+        echo "$fixed"
+        return 0
+      fi
       echo "/mnt/$pool"
       return 0
     fi
@@ -40,26 +61,35 @@ ushm_check_cache() {
   CACHE_POOL_NAME=""
   CACHE_PATH_RESOLVED=""
 
-  local path
+  local path got=0
   path=$(ushm_resolve_cache_path "${CACHE_PATH:-/mnt/cache}")
   CACHE_PATH_RESOLVED="$path"
   ushm_info "Prüfe Cache: $path${CACHE_POOL_NAME:+ (Pool: $CACHE_POOL_NAME)}"
 
-  # 1) Unraid disks.ini – gleiche Free/Size-Werte wie Main-Tab
-  if [[ -n "${CACHE_POOL_NAME:-}" ]] && ushm_unraid_disk_stats "$CACHE_POOL_NAME"; then
-    DF_TOTAL=$UNRAID_FS_TOTAL
-    DF_USED=$UNRAID_FS_USED
-    DF_AVAIL=$UNRAID_FS_FREE
-    DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
-    (( DF_PCT < 0 )) && DF_PCT=0
-    (( DF_PCT > 100 )) && DF_PCT=100
-    ushm_debug "Cache via disks.ini [$CACHE_POOL_NAME]: free=$(ushm_bytes_human "$DF_AVAIL") of $(ushm_bytes_human "$DF_TOTAL")"
-  elif [[ -e "$path" ]] && ushm_df "$path" "yes"; then
-    :
-  elif [[ -e "$path" ]] && ushm_df "$path" "no"; then
-    :
-  else
-    ushm_add_alert 2 "Cache" "Cache-Pfad/Pool nicht messbar: $path (CACHE_PATH prüfen)"
+  # A) Mount messen (btrfs/df) – stimmt mit „df -hT /mnt/…“ überein
+  if [[ -e "$path" ]] && ushm_df "$path" "no"; then
+    if (( DF_TOTAL > 0 )); then
+      got=1
+      ushm_debug "Cache via df/btrfs: free=$(ushm_bytes_human "$DF_AVAIL") of $(ushm_bytes_human "$DF_TOTAL")"
+    fi
+  fi
+
+  # B) Fallback: disks.ini (WebGUI), wenn Mount fehlt oder 0 lieferte
+  if (( got == 0 )) && [[ -n "${CACHE_POOL_NAME:-}" ]] && ushm_unraid_disk_stats "$CACHE_POOL_NAME"; then
+    if (( UNRAID_FS_TOTAL > 0 )); then
+      DF_TOTAL=$UNRAID_FS_TOTAL
+      DF_USED=$UNRAID_FS_USED
+      DF_AVAIL=$UNRAID_FS_FREE
+      DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
+      (( DF_PCT < 0 )) && DF_PCT=0
+      (( DF_PCT > 100 )) && DF_PCT=100
+      got=1
+      ushm_debug "Cache via disks.ini [$CACHE_POOL_NAME]: free=$(ushm_bytes_human "$DF_AVAIL") of $(ushm_bytes_human "$DF_TOTAL")"
+    fi
+  fi
+
+  if (( got == 0 )); then
+    ushm_add_alert 2 "Cache" "Cache-Pfad nicht messbar: ${CACHE_PATH:-?} → $path (Schreibweise prüfen, z.B. /mnt/cacheintern)"
     CACHE_BAR="──────────── n/a"
     return 1
   fi
@@ -80,9 +110,8 @@ ushm_check_cache() {
 
   ushm_info "Cache: $(ushm_bytes_human "$CACHE_AVAIL") frei von $(ushm_bytes_human "$CACHE_TOTAL") (${CACHE_PCT_USED}% belegt / ${CACHE_PCT_FREE}% frei)"
 
-  # Sanity: wenn df/btrfs ~30 GB meldet, WebGUI aber TB-Pool hat – Hinweis
   if (( CACHE_TOTAL > 0 && CACHE_TOTAL < 100000000000 )); then
-    ushm_warn "Cache-Gesamtgröße wirkt klein ($(ushm_bytes_human "$CACHE_TOTAL")). In config.conf CACHE_PATH auf den Pool aus Main setzen (z.B. /mnt/cache_nvme)."
+    ushm_warn "Cache-Gesamtgröße wirkt klein ($(ushm_bytes_human "$CACHE_TOTAL")). CACHE_PATH prüfen (ls /mnt/)."
   fi
 
   if (( CACHE_PCT_FREE < CACHE_CRIT )); then
