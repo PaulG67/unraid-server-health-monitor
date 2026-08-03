@@ -153,6 +153,15 @@ APPDATA_PATH=/mnt/user/appdata
 DOCKER_PATH=/var/lib/docker
 ```
 
+**Cache zeigt nur ~30 GB statt ~1 TB?** Dann ist `CACHE_PATH` oft der falsche Pool.
+Im Unraid-Main-Tab den **Pool-Namen** ablesen (z. B. `cache`, `cache_nvme`, `nvme`) und setzen:
+
+```ini
+CACHE_PATH=/mnt/DEIN_POOL_NAME
+```
+
+USHM liest den freien Platz primär aus `/var/local/emhttp/disks.ini` (dieselbe Quelle wie die WebGUI).
+
 ---
 
 ## 3. Tests

@@ -4,6 +4,9 @@
 #############################
 
 # Pfade (Unraid-Defaults – nur ändern wenn nötig)
+# CACHE_PATH: Mount deines Cache-Pools wie im Main-Tab (nicht /mnt/user/...).
+# Multi-Pool: z.B. /mnt/cache_nvme – Name muss zum Pool in Unraid passen.
+# Freier Speicher kommt primär aus disks.ini (gleiche Werte wie die WebGUI).
 CACHE_PATH=/mnt/cache
 APPDATA_PATH=/mnt/user/appdata
 DOCKER_PATH=/var/lib/docker

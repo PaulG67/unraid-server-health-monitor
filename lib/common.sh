@@ -170,6 +170,165 @@ ushm_dir_size_bytes() {
 }
 
 # ---------------------------------------------------------------------------
+# Unraid disks.ini – gleiche Quelle wie WebGUI (Main → Free/Size)
+# Setzt: UNRAID_FS_TOTAL UNRAID_FS_USED UNRAID_FS_FREE (Bytes)
+# ---------------------------------------------------------------------------
+ushm_unraid_ini_get() {
+  # $1=ini-file $2=section $3=key → Wert ohne Anführungszeichen
+  local file="$1" section="$2" key="$3"
+  [[ -f "$file" ]] || return 1
+  awk -F= -v sec="$section" -v key="$key" '
+    BEGIN { insec=0 }
+    /^\[/ {
+      s=$0
+      gsub(/^\[|\]$/, "", s)
+      insec = (s == sec)
+      next
+    }
+    insec && $1 == key {
+      val=$0
+      sub(/^[^=]*=/, "", val)
+      gsub(/\r/, "", val)
+      gsub(/^"/, "", val)
+      gsub(/"$/, "", val)
+      print val
+      exit
+    }
+  ' "$file"
+}
+
+# Unraid speichert fsSize/fsFree/fsUsed in KiB (WebGUI multipliziert mit 1024).
+# Fallback: bereits Bytes, wenn Werte realistisch groß sind (>= 100 GiB als nackte Zahl).
+ushm_unraid_fs_to_bytes() {
+  local v="${1:-0}"
+  [[ "$v" =~ ^[0-9]+$ ]] || { echo 0; return 1; }
+  # Bereits Bytes: >= 100 GiB
+  if (( v >= 107374182400 )); then
+    echo "$v"
+    return 0
+  fi
+  echo $(( v * 1024 ))
+}
+
+ushm_unraid_disk_stats() {
+  # $1 = Disk-/Pool-Name aus disks.ini (z.B. cache, cache_nvme)
+  local name="$1"
+  local ini="${2:-/var/local/emhttp/disks.ini}"
+  UNRAID_FS_TOTAL=0; UNRAID_FS_USED=0; UNRAID_FS_FREE=0
+  [[ -f "$ini" && -n "$name" ]] || return 1
+
+  local size free used
+  size=$(ushm_unraid_ini_get "$ini" "$name" "fsSize") || true
+  free=$(ushm_unraid_ini_get "$ini" "$name" "fsFree") || true
+  used=$(ushm_unraid_ini_get "$ini" "$name" "fsUsed") || true
+
+  [[ "$size" =~ ^[0-9]+$ && "$size" -gt 0 ]] || return 1
+
+  UNRAID_FS_TOTAL=$(ushm_unraid_fs_to_bytes "$size")
+  if [[ "$free" =~ ^[0-9]+$ ]]; then
+    UNRAID_FS_FREE=$(ushm_unraid_fs_to_bytes "$free")
+  fi
+  if [[ "$used" =~ ^[0-9]+$ ]]; then
+    UNRAID_FS_USED=$(ushm_unraid_fs_to_bytes "$used")
+  elif (( UNRAID_FS_TOTAL > 0 && UNRAID_FS_FREE > 0 )); then
+    UNRAID_FS_USED=$(( UNRAID_FS_TOTAL - UNRAID_FS_FREE ))
+    (( UNRAID_FS_USED < 0 )) && UNRAID_FS_USED=0
+  else
+    return 1
+  fi
+
+  if (( UNRAID_FS_FREE == 0 && UNRAID_FS_TOTAL > 0 && UNRAID_FS_USED > 0 )); then
+    UNRAID_FS_FREE=$(( UNRAID_FS_TOTAL - UNRAID_FS_USED ))
+    (( UNRAID_FS_FREE < 0 )) && UNRAID_FS_FREE=0
+  fi
+
+  (( UNRAID_FS_TOTAL > 0 )) || return 1
+  return 0
+}
+
+# Listet Cache-Pools aus disks.ini (type=Cache), größter zuerst: "name\tfsSizeKiB"
+ushm_unraid_list_cache_pools() {
+  local ini="${1:-/var/local/emhttp/disks.ini}"
+  [[ -f "$ini" ]] || return 1
+  awk '
+    /^\[/ {
+      if (sec != "" && tolower(typ) == "cache" && size+0 > 0)
+        printf "%s\t%s\n", sec, size
+      s=$0
+      gsub(/^\[|\]$/, "", s)
+      sec=s; typ=""; size=0
+      next
+    }
+    {
+      line=$0
+      gsub(/\r/, "", line)
+      if (line ~ /^type=/) {
+        typ=line; sub(/^type=/, "", typ); gsub(/^"|"$/, "", typ)
+      }
+      if (line ~ /^fsSize=/) {
+        size=line; sub(/^fsSize=/, "", size); gsub(/^"|"$/, "", size)
+      }
+    }
+    END {
+      if (sec != "" && tolower(typ) == "cache" && size+0 > 0)
+        printf "%s\t%s\n", sec, size
+    }
+  ' "$ini" | sort -t$'\t' -k2,2nr
+}
+
+# Wählt Pool-Namen: bevorzugter Name nur wenn er nicht deutlich kleiner ist als der größte Cache-Pool.
+# Sonst: größter type=Cache (wie typische Unraid-Main-Anzeige der Primär-SSD).
+ushm_unraid_pick_cache_pool() {
+  local prefer="${1:-}"
+  local ini="/var/local/emhttp/disks.ini"
+  [[ -f "$ini" ]] || return 1
+
+  local list
+  list=$(ushm_unraid_list_cache_pools "$ini" 2>/dev/null) || true
+  [[ -n "$list" ]] || return 1
+
+  local largest_name="" largest_size=0 name size prefer_size=""
+  while IFS=$'\t' read -r name size; do
+    [[ -z "$name" ]] && continue
+    if [[ -z "$largest_name" ]]; then
+      largest_name="$name"
+      largest_size="${size:-0}"
+    fi
+    if [[ -n "$prefer" && "$name" == "$prefer" ]]; then
+      prefer_size="${size:-0}"
+    fi
+  done <<<"$list"
+
+  [[ -n "$largest_name" ]] || return 1
+
+  # Bevorzugter Pool (CACHE_PATH), sofern er nicht deutlich kleiner als der größte ist
+  if [[ -n "$prefer" && -n "$prefer_size" ]]; then
+    # prefer_size / largest_size in KiB; wenn Prefer < 50% vom Größten → oft falscher Rest-Pool
+    if (( largest_size <= 0 || prefer_size * 2 >= largest_size )); then
+      echo "$prefer"
+      return 0
+    fi
+    ushm_warn "Cache-Pool '$prefer' ist klein gegenüber '$largest_name' – nutze '$largest_name' (WebGUI-Größe)"
+    echo "$largest_name"
+    return 0
+  fi
+
+  # Fallback: „cache“ wenn vorhanden und nicht winzig
+  while IFS=$'\t' read -r name size; do
+    if [[ "$name" == "cache" ]]; then
+      if (( largest_size <= 0 || size * 2 >= largest_size )); then
+        echo "cache"
+        return 0
+      fi
+      break
+    fi
+  done <<<"$list"
+
+  echo "$largest_name"
+  return 0
+}
+
+# ---------------------------------------------------------------------------
 # Btrfs-Pool-Größen (Unraid Cache oft btrfs; df allein ist irreführend)
 # Setzt: BTRFS_TOTAL BTRFS_USED BTRFS_FREE  (Bytes), return 0 bei Erfolg
 # ---------------------------------------------------------------------------
@@ -232,7 +391,29 @@ ushm_btrfs_usage() {
 # 3) portable df -Pk (letzte Zeile, %-Feld finden)
 ushm_df() {
   local path="$1"
+  local prefer_unraid="${2:-auto}" # auto|yes|no – Unraid disks.ini (WebGUI)
   DF_TOTAL=0; DF_USED=0; DF_AVAIL=0; DF_PCT=0
+  [[ -e "$path" || "$prefer_unraid" == "yes" ]] || return 1
+
+  # --- 0) Unraid WebGUI-Quelle (disks.ini) – stimmt mit Main-Tab überein ---
+  # Preferiert bei Cache-Pools unter /mnt/<pool>; Docker-Image-Pfad wird übersprungen.
+  if [[ "$prefer_unraid" != "no" && -f /var/local/emhttp/disks.ini ]]; then
+    local pool_name
+    pool_name=$(basename "$path")
+    if [[ "$path" == /mnt/* && "$pool_name" != "user" && "$pool_name" != disk* ]]; then
+      if ushm_unraid_disk_stats "$pool_name"; then
+        DF_TOTAL=$UNRAID_FS_TOTAL
+        DF_USED=$UNRAID_FS_USED
+        DF_AVAIL=$UNRAID_FS_FREE
+        DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
+        (( DF_PCT < 0 )) && DF_PCT=0
+        (( DF_PCT > 100 )) && DF_PCT=100
+        ushm_debug "df via disks.ini [$pool_name]: total=$DF_TOTAL used=$DF_USED free=$DF_AVAIL (${DF_PCT}%)"
+        return 0
+      fi
+    fi
+  fi
+
   [[ -e "$path" ]] || return 1
 
   # --- 1) Btrfs-Pool (Unraid Cache) ---

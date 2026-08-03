@@ -2,6 +2,14 @@
 
 Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 
+## [1.0.3] – 2026-08-03
+
+### Fixed
+
+- Cache-Freispeicher nutzt Unraid **`disks.ini`** (gleiche Quelle wie Main-Tab: z. B. ~796 GB frei), nicht nur `df`/`btrfs` auf einem evtl. falschen ~30‑GB-Mount.
+- Automatische Wahl des Cache-Pools (`type=Cache`); Warnung wenn `CACHE_PATH` nicht zum WebGUI-Pool passt.
+- Report/Log zeigt freigegebenen Pool-Namen.
+
 ## [1.0.2] – 2026-08-03
 
 ### Fixed
