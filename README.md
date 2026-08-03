@@ -2,7 +2,7 @@
 
 Zentrales Monitoring für Unraid – Cache, Docker, AppData-Wachstum, Alarme per Mail & Pushover.
 
-**Version:** 1.0.0 · **Kein Docker** – Bash-Skript für [User Scripts](https://forums.unraid.net/topic/48286-plugin-ca-user-scripts/)
+**Version:** 1.0.6 · **Kein Docker** – Bash-Skript für [User Scripts](https://forums.unraid.net/topic/48286-plugin-ca-user-scripts/)
 
 📘 **Weitergeben / Nachbauen:** → **[Installations- & Konfigurationsanleitung](docs/INSTALL.md)**
 
@@ -28,7 +28,7 @@ Status
 
 | Bereich | Prüfung |
 |--------|---------|
-| Cache SSD | freier Speicher |
+| Cache SSD | freier Speicher (nutzbar, RAID1-richtig ab v1.0.6) |
 | Docker | Image-Belegung, Container-Logs |
 | AppData | Top-N + Wachstum seit letztem Lauf |
 | Historie | CSV |
@@ -37,16 +37,36 @@ Status
 
 Roadmap: [docs/ROADMAP.md](docs/ROADMAP.md)
 
-## Schnellstart
+## Schnellstart (Installation)
 
 ```bash
 cd /tmp
+rm -rf ushm
 git clone https://github.com/PaulG67/unraid-server-health-monitor.git ushm
 cd ushm
 bash install.sh
 nano /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/config/config.conf
 bash /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/ushm.sh --test-notify
 ```
+
+## Update (wichtig)
+
+**Nicht** im Install-Ordner unter `/boot/...` `git pull` ausführen – dort ist oft kein GitHub-Remote (Fehler wie `Permission denied (publickey)` / steckengebliebene alte Version).
+
+Immer frisch von GitHub per **HTTPS** und Installer (`config.conf` bleibt erhalten):
+
+```bash
+cd /tmp
+rm -rf ushm
+git clone https://github.com/PaulG67/unraid-server-health-monitor.git ushm
+cd ushm
+cat VERSION
+bash install.sh
+cat /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/VERSION
+bash /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/ushm.sh --dry-run 2>&1 | grep -E 'USHM v|Cache:'
+```
+
+Details: **[docs/INSTALL.md §5 Updates](docs/INSTALL.md#5-updates)**
 
 Zeitplan in User Scripts (Custom), z.B. täglich 08:00:
 

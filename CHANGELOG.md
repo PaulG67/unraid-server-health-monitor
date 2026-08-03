@@ -9,6 +9,11 @@ Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 - Cache misst **nur** Kernel-`statvfs` / System-`df` (nie Btrfs „Device size“ = Summe beider RAID1-SSDs → fälschlich ~1.8 TB).
 - Log zeigt Mess-**Quelle** (`statvfs`/`df`) und VERSION zur Kontrolle.
 
+### Docs
+
+- Installation/Update: **kein** `git pull` im `/boot`-Ordner; immer `git clone` HTTPS nach `/tmp` + `install.sh`.
+- Cache-Pfad, RAID1, Fehler `Permission denied (publickey)` dokumentiert.
+
 ## [1.0.5] – 2026-08-03
 
 ### Fixed

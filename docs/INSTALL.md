@@ -145,22 +145,25 @@ LOG_WARN_MB=500        # Warnung bei Container-Logs gesamt ≥ 500 MB
 LOG_CRIT_MB=2000
 ```
 
-Pfade nur ändern, wenn du von Unraid-Standards abweichst:
+Pfade – wie `df -hT` und `ls /mnt/` (exakte Schreibweise, Linux ist case-sensitive):
 
 ```ini
-CACHE_PATH=/mnt/cache
+# Beispiel Multi-Pool: Pool heißt „cacheintern“
+CACHE_PATH=/mnt/cacheintern
 APPDATA_PATH=/mnt/user/appdata
 DOCKER_PATH=/var/lib/docker
 ```
 
-**Cache zeigt nur ~30 GB statt ~1 TB?** Dann ist `CACHE_PATH` oft der falsche Pool.
-Im Unraid-Main-Tab den **Pool-Namen** ablesen (z. B. `cache`, `cache_nvme`, `nvme`) und setzen:
+Hinweise Cache:
 
-```ini
-CACHE_PATH=/mnt/DEIN_POOL_NAME
-```
+| Symptom | Lösung |
+|---------|--------|
+| Pool heißt z. B. `cacheintern`, nicht `cache` | `CACHE_PATH=/mnt/cacheintern` (wie `df -hT`) |
+| `/mnt/Cacheintern` → 0 GB | Groß/Klein falsch; Pfad wie unter `/mnt/` |
+| „von ~1.8 TB“ bei 2×1 TB **RAID1** | alte Version (&lt; 1.0.6) – Update (Abschnitt 5); nutzbar ~1 TB |
+| Falscher kleiner Pool (~30 GB) | `CACHE_PATH` auf den großen Pool setzen |
 
-USHM liest den freien Platz primär aus `/var/local/emhttp/disks.ini` (dieselbe Quelle wie die WebGUI).
+Ab **v1.0.6** misst USHM den Cache mit Kernel-`statvfs` / `df` (nutzbare Größe, RAID1-richtig).
 
 ---
 
@@ -227,15 +230,42 @@ exec bash "${USHM}/ushm.sh" "$@"
 
 ## 5. Updates
 
+**Wichtig:** Der Install-Ordner unter `/boot/config/.../Unraid-Server-Health-Monitor/` ist **kein** GitHub-Checkout zum `git pull`. Dort oft:
+
+- fremder Remote (`git@backup…` → `Permission denied (publickey)`)
+- steckenbleibende alte `VERSION` (z. B. 1.0.2)
+- `install.sh` im gleichen Ordner kopiert nur denselben Stand auf sich selbst
+
+### Korrektes Update (immer so)
+
 ```bash
+# 1) Frische Kopie von GitHub (HTTPS, kein SSH-Key nötig)
 cd /tmp
 rm -rf ushm
 git clone https://github.com/PaulG67/unraid-server-health-monitor.git ushm
 cd ushm
+
+# 2) Version im Clone prüfen
+cat VERSION
+
+# 3) Nach /boot installieren (config.conf wird NICHT überschrieben)
 bash install.sh
+
+# 4) Installierte Version und Cache-Messung prüfen
+cat /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/VERSION
+bash /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/ushm.sh --dry-run 2>&1 | grep -E 'USHM v|Cache:'
 ```
 
-`install.sh` überschreibt eine bestehende **`config.conf` nicht**.
+Erwartung:
+
+- `VERSION` und Log `USHM v…` gleich und aktuell (z. B. **1.0.6**)
+- Cache-Zeile ≈ `df -hT /mnt/<pool>` (bei RAID1 **nicht** Summe beider SSDs)
+
+Optional – welche Mounts es gibt:
+
+```bash
+df -hT /mnt/* 2>/dev/null | grep -vE 'user|disk[0-9]|disks|remotes'
+```
 
 ---
 
@@ -289,7 +319,8 @@ Beim **ersten** Lauf gibt es noch kein Wachstum – ab dem **zweiten** Lauf ersc
 | Keine Mail trotz OK-Status | `MAIL_ON=warn` sendet nur bei Warnung/Crit – Test mit `--test-notify` oder `MAIL_ON=always` |
 | Script in User Scripts leer | Installer ausführen oder Wrapper von Abschnitt 4 einfügen |
 | `ushm.sh: No such file or directory` unter `/tmp/user.scripts/...` | User Scripts kopiert nur `script` nach `/tmp`. Wrapper muss den **absoluten** Pfad unter `/boot/config/...` aufrufen (Installer ab Fix 2026-07-28). Sofort-Fix: Inhalt von Abschnitt 4 in das Script einfügen |
-| Config nach Update weg? | sollte nicht passieren – `install.sh` lässt `config.conf` bestehen |
+| `git pull` → `Permission denied (publickey)` / alte VERSION | Remote im `/boot`-Ordner ist nicht GitHub. Update wie Abschnitt 5: `/tmp` + `git clone https://github.com/PaulG67/...` + `install.sh` |
+| Cache „von 1.8 TB“ bei 2×1 TB RAID1 | alte Version (&lt; 1.0.6) oder Btrfs Device-Summe. Update auf ≥1.0.6, Log muss `USHM v1.0.6` zeigen |
 
 ---
 
