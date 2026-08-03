@@ -381,10 +381,63 @@ ushm_unraid_pick_cache_pool() {
 }
 
 # ---------------------------------------------------------------------------
-# Btrfs-Pool-Größen (optional; RAID1: Device size = Summe aller Disks!)
-# Nutzbare Kapazität = Device size / Data ratio (RAID1 → ratio 2.00).
-# Free: Free (statfs, df) / Free (estimated) – nutzbarer freier Platz.
-# Setzt: BTRFS_TOTAL BTRFS_USED BTRFS_FREE  (Bytes), return 0 bei Erfolg
+# Nutzbare FS-Größe (Kernel/statvfs) – bei Btrfs-RAID1 ~1× Disk, nicht Summe
+# Setzt: DF_TOTAL DF_USED DF_AVAIL DF_PCT DF_SOURCE
+# ---------------------------------------------------------------------------
+ushm_statvfs() {
+  local path="$1"
+  DF_TOTAL=0; DF_USED=0; DF_AVAIL=0; DF_PCT=0; DF_SOURCE=""
+  [[ -e "$path" ]] || return 1
+
+  local out
+  # Python immer auf Unraid; gleiche API wie df (f_blocks / f_bavail)
+  if command -v python3 >/dev/null 2>&1; then
+    out=$(python3 -c '
+import os, sys
+p = sys.argv[1]
+st = os.statvfs(p)
+b = st.f_frsize
+total = b * st.f_blocks
+free = b * st.f_bavail
+used = total - (b * st.f_bfree)
+if used < 0:
+    used = 0
+print("%d %d %d" % (total, used, free))
+' "$path" 2>/dev/null) || true
+  elif command -v python >/dev/null 2>&1; then
+    out=$(python -c '
+import os, sys
+p = sys.argv[1]
+st = os.statvfs(p)
+b = st.f_frsize
+total = b * st.f_blocks
+free = b * st.f_bavail
+used = total - (b * st.f_bfree)
+if used < 0:
+    used = 0
+print("%d %d %d" % (total, used, free))
+' "$path" 2>/dev/null) || true
+  fi
+
+  if [[ -n "$out" ]]; then
+    local t u a
+    read -r t u a <<<"$out"
+    if [[ "$t" =~ ^[0-9]+$ && "$t" -gt 0 ]]; then
+      DF_TOTAL=$t
+      DF_USED=$u
+      DF_AVAIL=$a
+      DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
+      (( DF_PCT < 0 )) && DF_PCT=0
+      (( DF_PCT > 100 )) && DF_PCT=100
+      DF_SOURCE="statvfs"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# ---------------------------------------------------------------------------
+# Btrfs: nur Fallback. RAID1 → Total = Device size / Data ratio (nie Roh-Summe).
 # ---------------------------------------------------------------------------
 ushm_btrfs_usage() {
   local path="$1"
@@ -401,23 +454,44 @@ ushm_btrfs_usage() {
     /Device size:/ {
       for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit }
     }' <<<"$raw")
-  # z.B. "Data ratio:                       2.00"
+
   data_ratio=$(awk '
     /Data ratio:/ {
       for (i = 1; i <= NF; i++)
         if ($i ~ /^[0-9]+([.][0-9]+)?$/) { print $i; exit }
     }' <<<"$raw")
-  [[ -z "$data_ratio" ]] && data_ratio="1"
 
-  # Nutzbare Gesamtgröße (RAID1: ~ eine Disk, nicht Summe)
-  if [[ "$device_size" =~ ^[0-9]+$ && "$device_size" -gt 0 ]]; then
-    BTRFS_TOTAL=$(awk -v ds="$device_size" -v r="$data_ratio" 'BEGIN {
-      if (r+0 < 1) r=1
-      printf "%.0f", ds / r
-    }')
+  # Ratio oft fehlend/1 – dann aus Profil erraten (RAID1/RAID10/…)
+  if [[ -z "$data_ratio" || "$data_ratio" == "1" || "$data_ratio" == "1.00" ]]; then
+    if grep -qE 'Data,RAID1|Data,RAID1C3|Data,RAID1C4' <<<"$raw"; then
+      data_ratio="2"
+    elif grep -qE 'Data,RAID10' <<<"$raw"; then
+      data_ratio="2"
+    elif grep -qE 'Data,RAID5' <<<"$raw"; then
+      data_ratio="1.25"
+    elif grep -qE 'Data,RAID6' <<<"$raw"; then
+      data_ratio="1.5"
+    else
+      # Anzahl Geräte: 2+ gleich große → RAID1-artig teilen wenn "RAID1" irgendwo
+      local ndev
+      ndev=$(grep -cE '^\s*devid\s' <<<"$raw" 2>/dev/null || echo 0)
+      if grep -qi 'RAID1' <<<"$raw" && (( ndev >= 2 )); then
+        data_ratio="2"
+      else
+        data_ratio="1"
+      fi
+    fi
   fi
 
-  # Free: zuerst statfs/df (wie df und Unraid), dann estimated
+  if [[ ! "$device_size" =~ ^[0-9]+$ || "$device_size" -le 0 ]]; then
+    return 1
+  fi
+
+  BTRFS_TOTAL=$(awk -v ds="$device_size" -v r="$data_ratio" 'BEGIN {
+    if (r+0 < 1) r=1
+    printf "%.0f", ds / r
+  }')
+
   BTRFS_FREE=$(awk '
     /Free \(statfs, df\):/ {
       for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit }
@@ -429,45 +503,97 @@ ushm_btrfs_usage() {
       }' <<<"$raw")
   fi
 
-  # Overall "Used:" ist bei RAID oft roh/nicht nutzungsbezogen → aus Total−Free
-  if [[ "$BTRFS_TOTAL" =~ ^[0-9]+$ && "$BTRFS_TOTAL" -gt 0 && "$BTRFS_FREE" =~ ^[0-9]+$ ]]; then
-    if (( BTRFS_FREE > BTRFS_TOTAL )); then
-      # rare: ratio-Schätzung etwas knapp – Total an Free+Used aus Raw-Used anpassen
-      local raw_used
-      raw_used=$(awk '
-        /^[[:space:]]*Used:/ {
-          for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit }
-        }' <<<"$raw")
-      if [[ "$raw_used" =~ ^[0-9]+$ ]]; then
-        BTRFS_TOTAL=$(( BTRFS_FREE + raw_used ))
-      else
-        BTRFS_TOTAL=$BTRFS_FREE
+  [[ "$BTRFS_FREE" =~ ^[0-9]+$ ]] || return 1
+
+  # Nie Free+Raw-Used als Total (das bläst RAID1 auf ~2×)
+  if (( BTRFS_FREE > BTRFS_TOTAL )); then
+    # Free ist maßgeblich – Total leicht anheben, aber nicht verdoppeln
+    BTRFS_TOTAL=$BTRFS_FREE
+  fi
+  BTRFS_USED=$(( BTRFS_TOTAL - BTRFS_FREE ))
+  (( BTRFS_USED < 0 )) && BTRFS_USED=0
+
+  [[ "$BTRFS_TOTAL" -gt 0 ]] || return 1
+  return 0
+}
+
+# System-df ohne Btrfs/disks.ini (nukleare Cache-Variante)
+ushm_df_system() {
+  local path="$1"
+  DF_TOTAL=0; DF_USED=0; DF_AVAIL=0; DF_PCT=0; DF_SOURCE=""
+  [[ -e "$path" ]] || return 1
+
+  local t=0 u=0 a=0 p=0
+  local parsed=0
+
+  if command -v df >/dev/null 2>&1; then
+    local out pc
+    # GNU
+    if out=$(df -B1 --output=size,used,avail,pcent "$path" 2>/dev/null | awk 'NR==2 {print}'); then
+      read -r t u a pc <<<"$out"
+      if [[ "$t" =~ ^[0-9]+$ && "$t" -gt 0 ]]; then
+        p=${pc%%%}; p=${p// /}
+        parsed=1
       fi
     fi
-    BTRFS_USED=$(( BTRFS_TOTAL - BTRFS_FREE ))
-    (( BTRFS_USED < 0 )) && BTRFS_USED=0
-  else
-    return 1
+    if (( parsed == 0 )); then
+      local line
+      line=$(df -Pk "$path" 2>/dev/null | awk 'NR>1 { line=$0 } END { print line }')
+      if [[ -n "$line" ]]; then
+        local -a f=()
+        # shellcheck disable=SC2206
+        f=($line)
+        local i pct_i=-1
+        for (( i=0; i<${#f[@]}; i++ )); do
+          if [[ "${f[i]}" == *% ]]; then pct_i=$i; break; fi
+        done
+        if (( pct_i >= 3 )); then
+          t="${f[pct_i-3]}"; u="${f[pct_i-2]}"; a="${f[pct_i-1]}"
+          p="${f[pct_i]%%%}"
+          t=$(( t * 1024 )); u=$(( u * 1024 )); a=$(( a * 1024 ))
+          parsed=1
+        fi
+      fi
+    fi
   fi
 
-  [[ "$BTRFS_TOTAL" =~ ^[0-9]+$ && "$BTRFS_TOTAL" -gt 0 ]] || return 1
+  (( parsed == 1 )) || return 1
+  [[ "$t" =~ ^[0-9]+$ && "$t" -gt 0 ]] || return 1
+
+  DF_TOTAL=$t
+  DF_USED=$u
+  if [[ "$a" =~ ^[0-9]+$ ]]; then
+    DF_AVAIL=$a
+  else
+    DF_AVAIL=$(( t > u ? t - u : 0 ))
+  fi
+  DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
+  (( DF_PCT < 0 )) && DF_PCT=0
+  (( DF_PCT > 100 )) && DF_PCT=100
+  DF_SOURCE="df"
   return 0
 }
 
 # df: total/used/avail bytes + use% für einen Mount
-# Setzt: DF_TOTAL DF_USED DF_AVAIL DF_PCT
+# Setzt: DF_TOTAL DF_USED DF_AVAIL DF_PCT DF_SOURCE
 #
-# Reihenfolge:
-# 1) optional disks.ini (prefer_unraid)
-# 2) GNU/portable df – nutzbare Größe (RAID1-richtig, wie „df -hT“)
-# 3) btrfs filesystem usage mit Data-ratio (Fallback)
+# Prefer: statvfs → df → (optional disks.ini) → btrfs ratio-adj
 ushm_df() {
   local path="$1"
-  local prefer_unraid="${2:-auto}" # auto|yes|no – Unraid disks.ini (WebGUI)
-  DF_TOTAL=0; DF_USED=0; DF_AVAIL=0; DF_PCT=0
+  local prefer_unraid="${2:-auto}" # auto|yes|no
+  DF_TOTAL=0; DF_USED=0; DF_AVAIL=0; DF_PCT=0; DF_SOURCE=""
   [[ -e "$path" || "$prefer_unraid" == "yes" ]] || return 1
 
-  # --- 0) Unraid WebGUI-Quelle (disks.ini) – nur wenn nicht explizit abgewählt ---
+  # Mount: immer zuerst Kernel-Statistik (korrekt für RAID1)
+  if [[ -e "$path" ]] && ushm_statvfs "$path"; then
+    ushm_debug "df via statvfs: total=$DF_TOTAL used=$DF_USED free=$DF_AVAIL (${DF_PCT}%)"
+    return 0
+  fi
+  if [[ -e "$path" ]] && ushm_df_system "$path"; then
+    ushm_debug "df via system df: total=$DF_TOTAL used=$DF_USED free=$DF_AVAIL (${DF_PCT}%)"
+    return 0
+  fi
+
   if [[ "$prefer_unraid" != "no" && -f /var/local/emhttp/disks.ini ]]; then
     local pool_name
     pool_name=$(basename "$path")
@@ -479,6 +605,7 @@ ushm_df() {
         DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
         (( DF_PCT < 0 )) && DF_PCT=0
         (( DF_PCT > 100 )) && DF_PCT=100
+        DF_SOURCE="disks.ini"
         ushm_debug "df via disks.ini [$pool_name]: total=$DF_TOTAL used=$DF_USED free=$DF_AVAIL (${DF_PCT}%)"
         return 0
       fi
@@ -486,88 +613,8 @@ ushm_df() {
   fi
 
   [[ -e "$path" ]] || return 1
-
-  local t=0 u=0 a=0 p=0
-  local parsed=0
-
-  # --- 1) GNU df Bytes (bevorzugt: RAID1 zeigt ~1× Disk, nicht Summe) ---
-  if command -v df >/dev/null 2>&1; then
-    local out
-    if out=$(df -B1 --output=size,used,avail,pcent "$path" 2>/dev/null | awk 'NR==2 {print}'); then
-      local pc
-      read -r t u a pc <<<"$out"
-      if [[ -n "$t" && "$t" =~ ^[0-9]+$ && "$t" -gt 0 ]]; then
-        p=${pc%%%}
-        p=${p// /}
-        parsed=1
-      fi
-    fi
-  fi
-
-  # --- 2) Fallback: df -Pk ---
-  if (( parsed == 0 )); then
-    local line
-    line=$(df -Pk "$path" 2>/dev/null | awk 'NR>1 { line=$0 } END { print line }')
-    if [[ -n "$line" ]]; then
-      local -a f=()
-      # shellcheck disable=SC2206
-      f=($line)
-      local i pct_i=-1
-      for (( i=0; i<${#f[@]}; i++ )); do
-        if [[ "${f[i]}" == *% ]]; then
-          pct_i=$i
-          break
-        fi
-      done
-      if (( pct_i >= 3 )); then
-        t="${f[pct_i-3]}"
-        u="${f[pct_i-2]}"
-        a="${f[pct_i-1]}"
-        p="${f[pct_i]%%%}"
-        t=$(( t * 1024 ))
-        u=$(( u * 1024 ))
-        a=$(( a * 1024 ))
-        parsed=1
-      fi
-    fi
-  fi
-
-  if (( parsed == 1 )); then
-    [[ "$t" =~ ^[0-9]+$ && "$u" =~ ^[0-9]+$ ]] || return 1
-    (( t > 0 )) || return 1
-
-    DF_TOTAL=$t
-    DF_USED=$u
-
-    local free_calc=$(( DF_TOTAL - DF_USED ))
-    (( free_calc < 0 )) && free_calc=0
-
-    if [[ "$a" =~ ^[0-9]+$ ]] && (( a > 0 )); then
-      local lo hi
-      lo=$(( free_calc * 50 / 100 ))
-      hi=$(( free_calc * 150 / 100 ))
-      if (( free_calc == 0 )) || (( a >= lo && a <= hi )); then
-        DF_AVAIL=$a
-      else
-        DF_AVAIL=$free_calc
-      fi
-    else
-      DF_AVAIL=$free_calc
-    fi
-
-    DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
-    (( DF_PCT < 0 )) && DF_PCT=0
-    (( DF_PCT > 100 )) && DF_PCT=100
-    ushm_debug "df via system df: total=$DF_TOTAL used=$DF_USED free=$DF_AVAIL (${DF_PCT}%)"
-    return 0
-  fi
-
-  # --- 3) btrfs (Data ratio für RAID1) ---
   local fstype=""
   fstype=$(findmnt -n -o FSTYPE "$path" 2>/dev/null || true)
-  if [[ -z "$fstype" ]]; then
-    fstype=$(stat -f -c %T "$path" 2>/dev/null || true)
-  fi
   if [[ "${fstype,,}" == *btrfs* ]] && ushm_btrfs_usage "$path"; then
     DF_TOTAL=$BTRFS_TOTAL
     DF_USED=$BTRFS_USED
@@ -575,7 +622,8 @@ ushm_df() {
     DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
     (( DF_PCT < 0 )) && DF_PCT=0
     (( DF_PCT > 100 )) && DF_PCT=100
-    ushm_debug "df via btrfs (ratio-adj): total=$DF_TOTAL used=$DF_USED free=$DF_AVAIL (${DF_PCT}%)"
+    DF_SOURCE="btrfs"
+    ushm_debug "df via btrfs: total=$DF_TOTAL used=$DF_USED free=$DF_AVAIL (${DF_PCT}%)"
     return 0
   fi
 

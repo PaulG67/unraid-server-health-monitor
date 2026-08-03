@@ -2,6 +2,13 @@
 
 Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 
+## [1.0.6] – 2026-08-03
+
+### Fixed
+
+- Cache misst **nur** Kernel-`statvfs` / System-`df` (nie Btrfs „Device size“ = Summe beider RAID1-SSDs → fälschlich ~1.8 TB).
+- Log zeigt Mess-**Quelle** (`statvfs`/`df`) und VERSION zur Kontrolle.
+
 ## [1.0.5] – 2026-08-03
 
 ### Fixed
