@@ -2,6 +2,13 @@
 
 Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 
+## [1.0.5] – 2026-08-03
+
+### Fixed
+
+- Btrfs **RAID1**-Cache: nutzbare Größe statt Summe beider Disks (~932 GB / ~1 TB statt ~1.8 TB).
+- Messung primär über System-`df` (wie `df -hT`); Btrfs-Fallback teilt `Device size` durch **Data ratio**.
+
 ## [1.0.4] – 2026-08-03
 
 ### Fixed
