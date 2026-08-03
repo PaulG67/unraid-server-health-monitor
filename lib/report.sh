@@ -25,7 +25,7 @@ $(ushm_hr)
 Cache SSD
 
 ${CACHE_BAR:-n/a}
-$(ushm_bytes_human "${CACHE_AVAIL:-0}") frei  (${CACHE_PCT_FREE:-?}% free)
+$(ushm_bytes_human "${CACHE_AVAIL:-0}") frei von $(ushm_bytes_human "${CACHE_TOTAL:-0}")  (${CACHE_PCT_USED:-?}% belegt)
 
 $(ushm_hr)
 
@@ -78,7 +78,7 @@ EOF
 
 ushm_report_pushover() {
   local lines=()
-  lines+=("Cache: ${CACHE_PCT_USED:-?}% used, $(ushm_bytes_human "${CACHE_AVAIL:-0}") free")
+  lines+=("Cache: $(ushm_bytes_human "${CACHE_AVAIL:-0}") free of $(ushm_bytes_human "${CACHE_TOTAL:-0}") (${CACHE_PCT_USED:-?}% used)")
   lines+=("Docker: ${DOCKER_PCT:-?}%")
   lines+=("AppData: $(ushm_bytes_human "${APPDATA_TOTAL_BYTES:-0}")")
   lines+=("Logs: $(ushm_bytes_human "${DOCKER_LOG_BYTES:-0}")")
@@ -166,9 +166,9 @@ ushm_report_html() {
       <tr>
         <td style="padding:12px;background:#0f172a;border-radius:8px;width:50%;vertical-align:top;">
           <div style="font-size:12px;color:#94a3b8;">CACHE SSD</div>
-          <div style="font-size:20px;margin:6px 0;color:#f8fafc;font-weight:600;">${CACHE_PCT_USED:-?}%</div>
+          <div style="font-size:20px;margin:6px 0;color:#f8fafc;font-weight:600;">${CACHE_PCT_USED:-?}% belegt</div>
           <div style="font-family:Consolas,Menlo,monospace;font-size:12px;color:#94a3b8;">${CACHE_BAR:-}</div>
-          <div style="margin-top:6px;color:#cbd5e1;">$(ushm_bytes_human "${CACHE_AVAIL:-0}") frei</div>
+          <div style="margin-top:6px;color:#cbd5e1;">$(ushm_bytes_human "${CACHE_AVAIL:-0}") frei von $(ushm_bytes_human "${CACHE_TOTAL:-0}")</div>
         </td>
         <td style="width:12px;"></td>
         <td style="padding:12px;background:#0f172a;border-radius:8px;width:50%;vertical-align:top;">

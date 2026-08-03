@@ -33,15 +33,21 @@ ushm_check_cache() {
   CACHE_USED=$DF_USED
   CACHE_AVAIL=$DF_AVAIL
   CACHE_PCT_USED=$DF_PCT
-  CACHE_PCT_FREE=$(( 100 - CACHE_PCT_USED ))
+  if (( CACHE_TOTAL > 0 )); then
+    CACHE_PCT_FREE=$(( CACHE_AVAIL * 100 / CACHE_TOTAL ))
+  else
+    CACHE_PCT_FREE=$(( 100 - CACHE_PCT_USED ))
+  fi
+  (( CACHE_PCT_FREE < 0 )) && CACHE_PCT_FREE=0
+  (( CACHE_PCT_FREE > 100 )) && CACHE_PCT_FREE=100
   CACHE_BAR="$(ushm_pct_bar "$CACHE_PCT_USED")"
 
-  ushm_debug "Cache: used=${CACHE_PCT_USED}% free=${CACHE_PCT_FREE}% avail=$(ushm_bytes_human "$CACHE_AVAIL")"
+  ushm_debug "Cache: total=$(ushm_bytes_human "$CACHE_TOTAL") used=$(ushm_bytes_human "$CACHE_USED") free=$(ushm_bytes_human "$CACHE_AVAIL") (${CACHE_PCT_USED}% belegt / ${CACHE_PCT_FREE}% frei)"
 
   if (( CACHE_PCT_FREE < CACHE_CRIT )); then
-    ushm_add_alert 2 "Cache" "Nur noch ${CACHE_PCT_FREE}% frei ($(ushm_bytes_human "$CACHE_AVAIL")) – Schwellwert kritisch <${CACHE_CRIT}%"
+    ushm_add_alert 2 "Cache" "Nur noch ${CACHE_PCT_FREE}% frei ($(ushm_bytes_human "$CACHE_AVAIL") von $(ushm_bytes_human "$CACHE_TOTAL")) – Schwellwert kritisch <${CACHE_CRIT}%"
   elif (( CACHE_PCT_FREE < CACHE_WARN )); then
-    ushm_add_alert 1 "Cache" "Nur noch ${CACHE_PCT_FREE}% frei ($(ushm_bytes_human "$CACHE_AVAIL")) – Schwellwert Warnung <${CACHE_WARN}%"
+    ushm_add_alert 1 "Cache" "Nur noch ${CACHE_PCT_FREE}% frei ($(ushm_bytes_human "$CACHE_AVAIL") von $(ushm_bytes_human "$CACHE_TOTAL")) – Schwellwert Warnung <${CACHE_WARN}%"
   fi
 
   return 0

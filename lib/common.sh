@@ -169,21 +169,159 @@ ushm_dir_size_bytes() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# Btrfs-Pool-Größen (Unraid Cache oft btrfs; df allein ist irreführend)
+# Setzt: BTRFS_TOTAL BTRFS_USED BTRFS_FREE  (Bytes), return 0 bei Erfolg
+# ---------------------------------------------------------------------------
+ushm_btrfs_usage() {
+  local path="$1"
+  BTRFS_TOTAL=0; BTRFS_USED=0; BTRFS_FREE=0
+  command -v btrfs >/dev/null 2>&1 || return 1
+  [[ -e "$path" ]] || return 1
+
+  local raw
+  raw=$(btrfs filesystem usage -b "$path" 2>/dev/null) || return 1
+  [[ -n "$raw" ]] || return 1
+
+  # Zeilen z.B. "    Device size:             1000204886016"
+  BTRFS_TOTAL=$(awk '
+    /Device size:/ {
+      for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit }
+    }' <<<"$raw")
+  BTRFS_USED=$(awk '
+    /^[[:space:]]*Used:/ {
+      for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit }
+    }' <<<"$raw")
+  # Free (estimated): bevorzugen – entspricht dem nutzbaren freien Platz im Pool
+  BTRFS_FREE=$(awk '
+    /Free \(estimated\):/ {
+      for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit }
+    }' <<<"$raw")
+  # Fallback: Free (statfs, df)
+  if [[ -z "$BTRFS_FREE" || "$BTRFS_FREE" == "0" ]]; then
+    BTRFS_FREE=$(awk '
+      /Free \(statfs, df\):/ {
+        for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+$/) { print $i; exit }
+      }' <<<"$raw")
+  fi
+
+  [[ "$BTRFS_TOTAL" =~ ^[0-9]+$ && "$BTRFS_TOTAL" -gt 0 ]] || return 1
+
+  if [[ ! "$BTRFS_USED" =~ ^[0-9]+$ ]]; then
+    if [[ "$BTRFS_FREE" =~ ^[0-9]+$ ]]; then
+      BTRFS_USED=$(( BTRFS_TOTAL - BTRFS_FREE ))
+      (( BTRFS_USED < 0 )) && BTRFS_USED=0
+    else
+      return 1
+    fi
+  fi
+  if [[ ! "$BTRFS_FREE" =~ ^[0-9]+$ ]]; then
+    BTRFS_FREE=$(( BTRFS_TOTAL - BTRFS_USED ))
+    (( BTRFS_FREE < 0 )) && BTRFS_FREE=0
+  fi
+
+  return 0
+}
+
 # df: total/used/avail bytes + use% für einen Mount
 # Setzt: DF_TOTAL DF_USED DF_AVAIL DF_PCT
+#
+# Reihenfolge:
+# 1) btrfs filesystem usage (besser für Unraid-Cache-Pools)
+# 2) GNU df -B1 --output=...
+# 3) portable df -Pk (letzte Zeile, %-Feld finden)
 ushm_df() {
   local path="$1"
   DF_TOTAL=0; DF_USED=0; DF_AVAIL=0; DF_PCT=0
   [[ -e "$path" ]] || return 1
-  # POSIX: 1K-Blöcke
-  local line
-  line=$(df -Pk "$path" 2>/dev/null | awk 'NR==2 {print $2,$3,$4,$5}')
-  [[ -n "$line" ]] || return 1
-  local t u a p
-  read -r t u a p <<<"$line"
-  DF_TOTAL=$(( t * 1024 ))
-  DF_USED=$(( u * 1024 ))
-  DF_AVAIL=$(( a * 1024 ))
-  DF_PCT=${p%%%}
+
+  # --- 1) Btrfs-Pool (Unraid Cache) ---
+  local fstype=""
+  fstype=$(findmnt -n -o FSTYPE "$path" 2>/dev/null || true)
+  if [[ -z "$fstype" ]]; then
+    fstype=$(stat -f -c %T "$path" 2>/dev/null || true)
+  fi
+  if [[ "${fstype,,}" == *btrfs* ]] && ushm_btrfs_usage "$path"; then
+    DF_TOTAL=$BTRFS_TOTAL
+    DF_USED=$BTRFS_USED
+    DF_AVAIL=$BTRFS_FREE
+    DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
+    (( DF_PCT < 0 )) && DF_PCT=0
+    (( DF_PCT > 100 )) && DF_PCT=100
+    ushm_debug "df via btrfs: total=$DF_TOTAL used=$DF_USED free=$DF_AVAIL (${DF_PCT}%)"
+    return 0
+  fi
+
+  local t=0 u=0 a=0 p=0
+  local parsed=0
+
+  # --- 2) GNU df Bytes ---
+  if command -v df >/dev/null 2>&1; then
+    local out
+    if out=$(df -B1 --output=size,used,avail,pcent "$path" 2>/dev/null | awk 'NR==2 {print}'); then
+      local pc
+      read -r t u a pc <<<"$out"
+      if [[ -n "$t" && "$t" =~ ^[0-9]+$ && "$t" -gt 0 ]]; then
+        p=${pc%%%}
+        p=${p// /}
+        parsed=1
+      fi
+    fi
+  fi
+
+  # --- 3) Fallback: df -Pk, letzte Datenzeile; Capacity endet auf % ---
+  if (( parsed == 0 )); then
+    local line
+    line=$(df -Pk "$path" 2>/dev/null | awk 'NR>1 { line=$0 } END { print line }')
+    [[ -n "$line" ]] || return 1
+
+    local -a f=()
+    # shellcheck disable=SC2206
+    f=($line)
+    local i pct_i=-1
+    for (( i=0; i<${#f[@]}; i++ )); do
+      if [[ "${f[i]}" == *% ]]; then
+        pct_i=$i
+        break
+      fi
+    done
+    (( pct_i >= 3 )) || return 1
+
+    t="${f[pct_i-3]}"
+    u="${f[pct_i-2]}"
+    a="${f[pct_i-1]}"
+    p="${f[pct_i]%%%}"
+    t=$(( t * 1024 ))
+    u=$(( u * 1024 ))
+    a=$(( a * 1024 ))
+    parsed=1
+  fi
+
+  [[ "$t" =~ ^[0-9]+$ && "$u" =~ ^[0-9]+$ ]] || return 1
+  (( t > 0 )) || return 1
+
+  DF_TOTAL=$t
+  DF_USED=$u
+
+  local free_calc=$(( DF_TOTAL - DF_USED ))
+  (( free_calc < 0 )) && free_calc=0
+
+  if [[ "$a" =~ ^[0-9]+$ ]] && (( a > 0 )); then
+    local lo hi
+    lo=$(( free_calc * 50 / 100 ))
+    hi=$(( free_calc * 150 / 100 ))
+    if (( free_calc == 0 )) || (( a >= lo && a <= hi )); then
+      DF_AVAIL=$a
+    else
+      DF_AVAIL=$free_calc
+    fi
+  else
+    DF_AVAIL=$free_calc
+  fi
+
+  DF_PCT=$(( DF_USED * 100 / DF_TOTAL ))
+  (( DF_PCT < 0 )) && DF_PCT=0
+  (( DF_PCT > 100 )) && DF_PCT=100
+
   return 0
 }

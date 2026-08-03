@@ -2,6 +2,21 @@
 
 Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 
+## [1.0.2] – 2026-08-03
+
+### Fixed
+
+- Cache-SSD auf Unraid: Größen kommen zuerst aus `btrfs filesystem usage` (echte Pool-Größe der 1‑TB-SSD), nicht mehr nur aus oft irreführendem `df`.
+- Report zeigt weiterhin **„X frei von Y (Z% belegt)“**.
+
+## [1.0.1] – 2026-08-03
+
+### Fixed
+
+- Cache-SSD-Freispeicher: `df`-Parsing war fehleranfällig (umbrüche, inkonsistente Available vs. Use%).
+- Freier Platz und Belegung werden nun aus `Total`/`Used` konsistent berechnet.
+- Report/Mail zeigt **„X frei von Y (Z% belegt)“** statt isolierter, potenziell irreführender Werte.
+
 ## [1.0.0] – 2026-07-28
 
 ### Added
