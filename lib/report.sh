@@ -197,6 +197,10 @@ ushm_report_html() {
 
   [[ -z "$growth_rows" ]] && growth_rows="<tr><td style=\"color:#cbd5e1;\">keine Daten</td></tr>"
 
+  local parity_html smart_html
+  parity_html=$(ushm_ansi_to_html "${PARITY_REPORT:-(keine Daten)}")
+  smart_html=$(ushm_ansi_to_html "${SMART_REPORT:-(keine Daten)}")
+
   cat <<EOF
 <!DOCTYPE html>
 <html lang="de">
@@ -230,10 +234,10 @@ ushm_report_html() {
     </table>
 
     <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">Disks / Parität (Inventar + Array I/O)</h3>
-    <pre style="margin:0;padding:12px;background:#0f172a;border-radius:8px;color:#cbd5e1;font-size:12px;white-space:pre-wrap;">${PARITY_REPORT:-(keine Daten)}</pre>
+    <pre style="margin:0;padding:12px;background:#0f172a;border-radius:8px;color:#cbd5e1;font-size:12px;white-space:pre-wrap;">${parity_html}</pre>
 
     <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">SMART (alle Disks)</h3>
-    <pre style="margin:0;padding:12px;background:#0f172a;border-radius:8px;color:#cbd5e1;font-size:12px;white-space:pre-wrap;">${SMART_REPORT:-(keine Daten)}</pre>
+    <pre style="margin:0;padding:12px;background:#0f172a;border-radius:8px;color:#cbd5e1;font-size:12px;white-space:pre-wrap;">${smart_html}</pre>
 
     <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">Top AppData</h3>
     <table style="width:100%;border-collapse:collapse;font-size:14px;color:#f1f5f9;">${app_rows}</table>

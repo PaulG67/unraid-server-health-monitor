@@ -2,6 +2,14 @@
 
 Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 
+## [2.1.1] – 2026-11-11
+
+### Fixed / Improved
+
+- **Leere Slots ausgeblendet**: nur Disks mit Gerät (`device`) und ohne `DISK_NP` in Übersicht, Inventar und SMART.
+- **Kritische Werte farbig** (rot/gelb) in Console- und HTML-Report (Status, I/O, Temp, SMART-Attribute).
+- **SMART-Alarme präziser**: bei FAILED die auffälligen Attribute; bei fehlendem SMART klar „nicht verfügbar“ statt pauschal FAILED.
+
 ## [2.1.0] – 2026-11-11
 
 ### Added

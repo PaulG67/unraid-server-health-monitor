@@ -16,6 +16,24 @@ USHM_GREEN="🟢"
 USHM_YELLOW="🟡"
 USHM_RED="🔴"
 
+# ANSI für kritische Werte im Terminal-Report (HTML: ushm_ansi_to_html)
+USHM_C_RED=$'\033[31m'
+USHM_C_YEL=$'\033[33m'
+USHM_C_RST=$'\033[0m'
+
+# $1=text → rot / gelb (kritisch / Warnung)
+ushm_c_red() { printf '%s%s%s' "$USHM_C_RED" "$1" "$USHM_C_RST"; }
+ushm_c_yel() { printf '%s%s%s' "$USHM_C_YEL" "$1" "$USHM_C_RST"; }
+
+# ANSI → HTML-Spans (für Mail-Report <pre>)
+ushm_ansi_to_html() {
+  local s="$1"
+  s=${s//$USHM_C_RED/<span style="color:#f87171;font-weight:600">}
+  s=${s//$USHM_C_YEL/<span style="color:#fbbf24;font-weight:600">}
+  s=${s//$USHM_C_RST/<\/span>}
+  printf '%s' "$s"
+}
+
 # Globale Statusstufe: 0=ok, 1=warn, 2=crit
 USHM_SEVERITY=0
 

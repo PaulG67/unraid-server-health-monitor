@@ -17,13 +17,21 @@ ushm_array_defaults() {
   DISK_ERROR_CRIT="${DISK_ERROR_CRIT:-${PARITY_ERROR_CRIT}}"
 }
 
-# Alle Nicht-Flash-Disks: name\ttype\tdevice\tstatus\tnumErrors\ttemp\tcolor\tid
+# Nur vorhandene Disks (device gesetzt, kein leerer Slot DISK_NP):
+# name\ttype\tdevice\tstatus\tnumErrors\ttemp\tcolor\tid
 ushm_array_list_disks() {
   local ini="${1:-/var/local/emhttp/disks.ini}"
   [[ -f "$ini" ]] || return 1
   awk '
+    function present() {
+      if (tolower(typ) == "flash") return 0
+      if (device == "") return 0
+      # Leere/unbelegte Slots ausblenden
+      if (toupper(status) == "DISK_NP") return 0
+      return 1
+    }
     /^\[/ {
-      if (sec != "" && tolower(typ) != "flash" && (device != "" || tolower(typ) == "parity" || tolower(typ) == "data" || tolower(typ) == "cache")) {
+      if (sec != "" && present()) {
         printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
           (name!=""?name:sec), typ, device, status, errors, temp, color, id
       }
@@ -43,10 +51,38 @@ ushm_array_list_disks() {
       if (line ~ /^id=/)     { id=line; sub(/^id=/,"",id); gsub(/^"|"$/,"",id) }
     }
     END {
-      if (sec != "" && tolower(typ) != "flash" && (device != "" || tolower(typ) == "parity" || tolower(typ) == "data" || tolower(typ) == "cache")) {
+      if (sec != "" && present()) {
         printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
           (name!=""?name:sec), typ, device, status, errors, temp, color, id
       }
+    }
+  ' "$ini"
+}
+
+# Zählt leere Array-/Pool-Slots (DISK_NP oder ohne device, ohne Flash)
+ushm_array_count_empty_slots() {
+  local ini="${1:-/var/local/emhttp/disks.ini}"
+  [[ -f "$ini" ]] || { echo 0; return 0; }
+  awk '
+    /^\[/ {
+      if (sec != "" && tolower(typ) != "flash") {
+        if (device == "" || toupper(status) == "DISK_NP") empty++
+      }
+      s=$0; gsub(/^\[|\]$/, "", s)
+      sec=s; typ=""; device=""; status=""
+      next
+    }
+    {
+      line=$0; gsub(/\r/, "", line)
+      if (line ~ /^type=/)   { typ=line; sub(/^type=/,"",typ); gsub(/^"|"$/,"",typ) }
+      if (line ~ /^device=/) { device=line; sub(/^device=/,"",device); gsub(/^"|"$/,"",device) }
+      if (line ~ /^status=/) { status=line; sub(/^status=/,"",status); gsub(/^"|"$/,"",status) }
+    }
+    END {
+      if (sec != "" && tolower(typ) != "flash") {
+        if (device == "" || toupper(status) == "DISK_NP") empty++
+      }
+      print empty+0
     }
   ' "$ini"
 }
@@ -97,14 +133,15 @@ ushm_check_disk_inventory() {
   ushm_mkdir_p "$(dirname "$inv_file")"
 
   local name typ device status errors temp color id
-  local list
+  local list empty_slots
   list=$(ushm_array_list_disks) || true
+  empty_slots=$(ushm_array_count_empty_slots) || empty_slots=0
   : >"$cur_file"
 
   while IFS=$'\t' read -r name typ device status errors temp color id; do
-    [[ -z "$name" ]] && continue
-    # name|type|device|id
-    printf '%s|%s|%s|%s\n' "$name" "$typ" "${device:-}" "${id:-}" >>"$cur_file"
+    [[ -z "$name" || -z "$device" ]] && continue
+    # name|type|device|id – nur vorhandene Disks
+    printf '%s|%s|%s|%s\n' "$name" "$typ" "$device" "${id:-}" >>"$cur_file"
     DISK_COUNT=$(( DISK_COUNT + 1 ))
   done <<<"$list"
 
@@ -114,25 +151,28 @@ ushm_check_disk_inventory() {
   fi
 
   local lines=()
-  lines+=("Disks im Array/Pools: ${DISK_COUNT}")
+  lines+=("Vorhandene Disks: ${DISK_COUNT}${empty_slots:+ · leere Slots ausgeblendet: ${empty_slots}}")
 
   if [[ ! -f "$inv_file" ]]; then
     lines+=("Baseline gespeichert (erster Inventar-Lauf)")
     cp -f "$cur_file" "$inv_file"
     DISK_INVENTORY_REPORT=$(printf '%s\n' "${lines[@]}")
-    ushm_info "Disk-Inventar: ${DISK_COUNT} Disks (Baseline)"
+    ushm_info "Disk-Inventar: ${DISK_COUNT} vorhanden (Baseline), ${empty_slots} leer ausgeblendet"
     rm -f "$cur_file"
     return 0
   fi
 
   # Index vorheriger Inventar-Einträge: name → type|device|id
+  # Alte Einträge ohne device (leere Slots) ignorieren → kein Fehlalarm
   declare -A prev_map=()
-  local row p_name p_rest
+  local row p_name p_rest p_type p_dev p_id
   while IFS= read -r row; do
     [[ -z "$row" || "$row" == \#* ]] && continue
     p_name="${row%%|*}"
     p_rest="${row#*|}"
-    [[ -n "$p_name" ]] && prev_map["$p_name"]="$p_rest"
+    IFS='|' read -r p_type p_dev p_id <<<"$p_rest"
+    [[ -z "$p_name" || -z "$p_dev" ]] && continue
+    prev_map["$p_name"]="$p_rest"
   done <"$inv_file"
 
   declare -A cur_map=()
@@ -228,15 +268,18 @@ ushm_check_array() {
   fi
 
   [[ -z "$ARRAY_SYNC_ERRS" ]] && ARRAY_SYNC_ERRS=0
+  local sync_disp="$ARRAY_SYNC_ERRS"
   if [[ "$ARRAY_SYNC_ERRS" =~ ^[0-9]+$ ]] && (( ARRAY_SYNC_ERRS > 0 )); then
+    sync_disp="$(ushm_c_red "$ARRAY_SYNC_ERRS")"
     ushm_add_alert 2 "Parity" "Parity-Sync-Fehler (sbSyncErrs=${ARRAY_SYNC_ERRS}) – Parität prüfen"
   fi
 
-  local list
+  local list empty_slots
   list=$(ushm_array_list_disks) || true
+  empty_slots=$(ushm_array_count_empty_slots) || empty_slots=0
   if [[ -z "$list" ]]; then
-    ushm_warn "Keine Disks in disks.ini gefunden"
-    PARITY_REPORT="${DISK_INVENTORY_REPORT}"$'\n'"(keine Disks)"
+    ushm_warn "Keine vorhandenen Disks in disks.ini gefunden"
+    PARITY_REPORT="${DISK_INVENTORY_REPORT}"$'\n'"(keine vorhandenen Disks${empty_slots:+, ${empty_slots} leere Slots})"
     return 0
   fi
 
@@ -248,7 +291,8 @@ ushm_check_array() {
   }' | sort -t$'\t' -k1,1n -k2,2 | cut -f2-)
 
   local header_lines=()
-  header_lines+=("Array: ${ARRAY_MD_STATE:-?} · SyncErrs: ${ARRAY_SYNC_ERRS}${ARRAY_RESYNC:+ · ${ARRAY_RESYNC}}")
+  header_lines+=("Array: ${ARRAY_MD_STATE:-?} · SyncErrs: ${sync_disp}${ARRAY_RESYNC:+ · ${ARRAY_RESYNC}}")
+  (( empty_slots > 0 )) && header_lines+=("Hinweis: ${empty_slots} leere Array-Slots ausgeblendet")
   if [[ -n "${DISK_INVENTORY_REPORT:-}" ]]; then
     local iline
     while IFS= read -r iline; do
@@ -261,7 +305,8 @@ ushm_check_array() {
   local name typ device status errors temp color id
 
   while IFS=$'\t' read -r name typ device status errors temp color id; do
-    [[ -z "$name" ]] && continue
+    [[ -z "$name" || -z "$device" ]] && continue
+    [[ "${status^^}" == "DISK_NP" ]] && continue
     [[ -z "$errors" || ! "$errors" =~ ^[0-9]+$ ]] && errors=0
 
     local typ_l="${typ,,}"
@@ -321,9 +366,49 @@ ushm_check_array() {
       delta_txt="  (=)"
     fi
 
+    local cat_label="Disk"
+    [[ "$typ_l" == "parity" ]] && cat_label="Parity"
+    [[ "$typ_l" == "cache" ]] && cat_label="Cache"
+
+    local warn_th crit_th
+    if [[ "$typ_l" == "parity" ]]; then
+      warn_th=$PARITY_ERROR_WARN
+      crit_th=$PARITY_ERROR_CRIT
+    else
+      warn_th=$DISK_ERROR_WARN
+      crit_th=$DISK_ERROR_CRIT
+    fi
+
+    # Farbige Werte: Status / I/O / Temp
+    local status_disp="${status:-?}"
+    case "${status^^}" in
+      DISK_OK) ;;
+      DISK_DSBL|DISK_NP_DSBL|DISK_NP_MISSING|DISK_INVALID|DISK_WRONG|DISK_DSBL_NEW)
+        status_disp="$(ushm_c_red "$status_disp")"
+        ;;
+      *)
+        [[ "${color,,}" == *"red"* ]] && status_disp="$(ushm_c_red "$status_disp")"
+        ;;
+    esac
+
+    local io_disp="$errors"
+    if (( errors >= crit_th )) || (( delta > 0 && errors > 0 )); then
+      io_disp="$(ushm_c_red "$errors")"
+    elif (( errors >= warn_th )); then
+      io_disp="$(ushm_c_yel "$errors")"
+    fi
+
+    local temp_disp="${temp:-?}"
+    if [[ "$temp" =~ ^[0-9]+$ ]]; then
+      if (( temp >= ${SMART_CRIT:-65} )); then
+        temp_disp="$(ushm_c_red "$temp")"
+      elif (( temp >= ${SMART_WARN:-55} )); then
+        temp_disp="$(ushm_c_yel "$temp")"
+      fi
+    fi
+
     local dev_txt="${device:-—}"
-    local temp_txt="${temp:-?}"
-    section_lines+=("  ${name}: ${status:-?}  I/O=${errors}${delta_txt}  T=${temp_txt}°C  /dev/${dev_txt}")
+    section_lines+=("  ${name}: ${status_disp}  I/O=${io_disp}${delta_txt}  T=${temp_disp}°C  /dev/${dev_txt}")
 
     # Parity-Arrays für Historie / SMART-Fallback
     if [[ "$typ_l" == "parity" ]]; then
@@ -337,26 +422,13 @@ ushm_check_array() {
       PARITY_ID+=("${id:-}")
     fi
 
-    local cat_label="Disk"
-    [[ "$typ_l" == "parity" ]] && cat_label="Parity"
-    [[ "$typ_l" == "cache" ]] && cat_label="Cache"
-
     case "${status^^}" in
-      DISK_DSBL|DISK_DSBL_NP|DISK_NP|DISK_INVALID|DISK_WRONG)
+      DISK_DSBL|DISK_NP_DSBL|DISK_NP_MISSING|DISK_INVALID|DISK_WRONG|DISK_DSBL_NEW)
         ushm_add_alert 2 "$cat_label" "${name}: Status ${status} – Disk ersetzen/prüfen"
         ;;
     esac
     if [[ "${color,,}" == *"red"* ]]; then
       ushm_add_alert 2 "$cat_label" "${name}: Unraid meldet rot (color=${color})"
-    fi
-
-    local warn_th crit_th
-    if [[ "$typ_l" == "parity" ]]; then
-      warn_th=$PARITY_ERROR_WARN
-      crit_th=$PARITY_ERROR_CRIT
-    else
-      warn_th=$DISK_ERROR_WARN
-      crit_th=$DISK_ERROR_CRIT
     fi
 
     if (( have_prev == 1 )) && (( errors >= crit_th )) && (( delta > 0 )); then

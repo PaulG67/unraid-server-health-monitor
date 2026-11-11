@@ -93,6 +93,62 @@ ushm_smart_temp_from_text() {
   echo ""
 }
 
+# Attribute mit WHEN_FAILED = FAILING_NOW / In_the_past
+ushm_smart_failing_attrs() {
+  local text="$1"
+  awk '
+    $1 ~ /^[0-9]+$/ {
+      for (i = 1; i <= NF; i++) {
+        if ($i == "FAILING_NOW" || $i == "In_the_past") {
+          printf "%s=%s(%s) ", $2, $NF, $i
+          break
+        }
+      }
+    }
+  ' <<<"$text" | sed 's/[[:space:]]*$//'
+}
+
+ushm_smart_parse_health() {
+  # Setzt SMART_HEALTH_RESULT + SMART_HEALTH_REASON (stdout: health code)
+  local text="$1"
+  SMART_HEALTH_REASON=""
+
+  if grep -qiE 'device is in (STANDBY|SLEEP)|Device is in STANDBY' <<<"$text"; then
+    SMART_HEALTH_REASON="Standby"
+    echo "STANDBY"
+    return 0
+  fi
+  if grep -qiE 'Unable to (establish|read)|No such device|Permission denied|failed:|Error SMART|SMART support is:.*(Unavailable|Disabled)|Unknown USB bridge|INQUIRY failed' <<<"$text"; then
+    SMART_HEALTH_REASON=$(grep -iE 'Unable to|No such device|Permission denied|SMART support is:|Unknown USB|INQUIRY failed|Error SMART' <<<"$text" | head -1 | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | cut -c1-120)
+    [[ -z "$SMART_HEALTH_REASON" ]] && SMART_HEALTH_REASON="smartctl konnte SMART nicht lesen"
+    echo "UNAVAIL"
+    return 0
+  fi
+
+  if grep -qiE 'SMART overall-health self-assessment test result:[[:space:]]*PASSED' <<<"$text"; then
+    echo "PASSED"
+    return 0
+  fi
+  if grep -qiE 'SMART overall-health self-assessment test result:[[:space:]]*FAILED' <<<"$text"; then
+    SMART_HEALTH_REASON=$(grep -i 'SMART overall-health self-assessment test result:' <<<"$text" | head -1 | sed 's/^[[:space:]]*//')
+    echo "FAILED"
+    return 0
+  fi
+  if grep -qiE 'SMART Health Status:[[:space:]]*OK' <<<"$text"; then
+    echo "PASSED"
+    return 0
+  fi
+  if grep -qiE 'SMART Health Status:[[:space:]]*(FAILED|FAILURE)' <<<"$text"; then
+    SMART_HEALTH_REASON=$(grep -i 'SMART Health Status:' <<<"$text" | head -1 | sed 's/^[[:space:]]*//')
+    echo "FAILED"
+    return 0
+  fi
+
+  SMART_HEALTH_REASON="kein overall-health Ergebnis in smartctl-Ausgabe"
+  echo "UNKNOWN"
+  return 0
+}
+
 ushm_smart_section_label() {
   case "${1,,}" in
     parity) echo "Parity" ;;
@@ -108,11 +164,14 @@ ushm_smart_probe_disk() {
   local devpath="/dev/${device}"
   [[ -b "$devpath" ]] || {
     ushm_warn "SMART ${name}: Gerät $devpath fehlt"
-    SMART_LINES+=("SKIP|${typ}|${name}|Gerät /dev/${device} fehlt")
+    SMART_UNAVAIL_COUNT=$(( SMART_UNAVAIL_COUNT + 1 ))
+    SMART_LINES+=("UNAVAIL|${typ}|${name}|$(ushm_c_yel "SMART nicht verfügbar") – Gerät /dev/${device} fehlt")
+    ushm_add_alert 1 "SMART" "${name}: SMART nicht verfügbar – Gerät /dev/${device} fehlt (Disk offline oder Slot leer?)"
     return 1
   }
 
   local out rc=0 health="?" standby=0
+  SMART_HEALTH_REASON=""
   rc=0
   out=$(smartctl -n standby -H -A "$devpath" 2>&1) || rc=$?
 
@@ -122,31 +181,35 @@ ushm_smart_probe_disk() {
 
   if (( standby == 1 )); then
     SMART_STANDBY_COUNT=$(( SMART_STANDBY_COUNT + 1 ))
-    SMART_LINES+=("STANDBY|${typ}|${name}|Standby – kein Spin-up")
+    SMART_LINES+=("STANDBY|${typ}|${name}|Standby – SMART übersprungen (kein Spin-up)")
     ushm_debug "SMART ${name}: standby"
     return 0
   fi
 
-  if ! grep -qiE 'SMART (overall-health|Health) Status|PASSED|FAILED|OK' <<<"$out"; then
+  health=$(ushm_smart_parse_health "$out")
+  if [[ "$health" == "UNKNOWN" || "$health" == "UNAVAIL" ]]; then
+    # Ohne -n standby erneut versuchen
     rc=0
     out=$(smartctl -H -A "$devpath" 2>&1) || rc=$?
+    health=$(ushm_smart_parse_health "$out")
   fi
 
-  if grep -qiE 'PASSED|OK' <<<"$out" && ! grep -qiE 'FAILED' <<<"$out"; then
-    health="PASSED"
-  elif grep -qiE 'FAILED' <<<"$out"; then
-    health="FAILED"
-  else
-    health="UNKNOWN"
+  if [[ "$health" == "UNAVAIL" ]]; then
+    SMART_UNAVAIL_COUNT=$(( SMART_UNAVAIL_COUNT + 1 ))
+    local why="${SMART_HEALTH_REASON:-smartctl ohne Ergebnis}"
+    SMART_LINES+=("UNAVAIL|${typ}|${name}|$(ushm_c_yel "SMART nicht verfügbar") – ${why}")
+    ushm_add_alert 1 "SMART" "${name}: SMART nicht verfügbar – ${why}"
+    return 0
   fi
 
-  local realloc pending uncorr reported crc temp
+  local realloc pending uncorr reported crc temp failing
   realloc=$(ushm_smart_attr_raw "$out" 5 "Reallocated_Sector")
   pending=$(ushm_smart_attr_raw "$out" 197 "Current_Pending")
   uncorr=$(ushm_smart_attr_raw "$out" 198 "Offline_Uncorrectable")
   reported=$(ushm_smart_attr_raw "$out" 187 "Reported_Uncorrect")
   crc=$(ushm_smart_attr_raw "$out" 199 "UDMA_CRC_Error")
   temp=$(ushm_smart_temp_from_text "$out")
+  failing=$(ushm_smart_failing_attrs "$out")
 
   realloc=${realloc%%[^0-9]*}; realloc=${realloc:-0}
   pending=${pending%%[^0-9]*}; pending=${pending:-0}
@@ -207,16 +270,57 @@ ushm_smart_probe_disk() {
   if (( have_prev == 0 )); then
     delta_txt="  (Baseline)"
   elif (( ${#deltas[@]} > 0 )); then
-    delta_txt="  Δ: $(IFS=,; echo "${deltas[*]}")"
+    delta_txt="  Δ: $(ushm_c_red "$(IFS=,; echo "${deltas[*]}")")"
   fi
 
-  local temp_txt="${temp:-?}"
-  local detail="${health}  T=${temp_txt}°C  Realloc=${realloc}  Pending=${pending}  OfflineUnc=${uncorr}  CRC=${crc}${delta_txt}"
-  SMART_LINES+=("OK|${typ}|${name}|${detail}")
+  # Kritische Werte farbig
+  local health_disp="$health"
+  [[ "$health" == "FAILED" ]] && health_disp="$(ushm_c_red "FAILED")"
+  [[ "$health" == "UNKNOWN" ]] && health_disp="$(ushm_c_yel "UNKNOWN")"
+
+  local realloc_disp="$realloc" pending_disp="$pending" uncorr_disp="$uncorr" crc_disp="$crc"
+  (( realloc >= SMART_REALLOC_WARN )) && realloc_disp="$(ushm_c_red "$realloc")"
+  (( pending >= SMART_PENDING_WARN )) && pending_disp="$(ushm_c_red "$pending")"
+  (( uncorr >= SMART_UNCORR_WARN )) && uncorr_disp="$(ushm_c_red "$uncorr")"
+  (( crc >= SMART_CRC_WARN )) && crc_disp="$(ushm_c_yel "$crc")"
+
+  local temp_disp="${temp:-?}"
+  if [[ "$temp" =~ ^[0-9]+$ ]]; then
+    if (( temp >= SMART_CRIT )); then
+      temp_disp="$(ushm_c_red "$temp")"
+    elif (( temp >= SMART_WARN )); then
+      temp_disp="$(ushm_c_yel "$temp")"
+    fi
+  fi
+
+  local detail="${health_disp}  T=${temp_disp}°C  Realloc=${realloc_disp}  Pending=${pending_disp}  OfflineUnc=${uncorr_disp}  CRC=${crc_disp}${delta_txt}"
+  local line_status="OK"
+  [[ "$health" == "FAILED" ]] && line_status="FAILED"
+  [[ "$health" == "UNKNOWN" ]] && line_status="UNKNOWN"
+  SMART_LINES+=("${line_status}|${typ}|${name}|${detail}")
+
+  # Gründe für FAILED / Auffälligkeiten sammeln
+  local problems=()
+  (( realloc >= SMART_REALLOC_WARN )) && problems+=("Reallocated=${realloc}")
+  (( pending >= SMART_PENDING_WARN )) && problems+=("Pending=${pending}")
+  (( uncorr >= SMART_UNCORR_WARN )) && problems+=("OfflineUnc=${uncorr}")
+  (( reported >= SMART_REALLOC_WARN )) && problems+=("ReportedUnc=${reported}")
+  (( crc >= SMART_CRC_WARN )) && problems+=("CRC=${crc}")
+  [[ -n "$failing" ]] && problems+=("Attr: ${failing}")
 
   if [[ "$health" == "FAILED" ]]; then
     SMART_FAIL_COUNT=$(( SMART_FAIL_COUNT + 1 ))
-    ushm_add_alert 2 "SMART" "${name}: SMART Health FAILED"
+    local detail_msg
+    if (( ${#problems[@]} > 0 )); then
+      detail_msg=$(IFS=', '; echo "${problems[*]}")
+      ushm_add_alert 2 "SMART" "${name}: SMART Health FAILED – ${detail_msg}"
+    else
+      detail_msg="${SMART_HEALTH_REASON:-overall-health FAILED (keine Einzelattribute erhöht)}"
+      ushm_add_alert 2 "SMART" "${name}: SMART Health FAILED – ${detail_msg}"
+    fi
+  elif [[ "$health" == "UNKNOWN" ]]; then
+    SMART_UNAVAIL_COUNT=$(( SMART_UNAVAIL_COUNT + 1 ))
+    ushm_add_alert 1 "SMART" "${name}: SMART-Status unklar – ${SMART_HEALTH_REASON:-keine Health-Zeile}"
   elif [[ "$health" == "PASSED" ]]; then
     SMART_OK_COUNT=$(( SMART_OK_COUNT + 1 ))
   fi
@@ -229,20 +333,23 @@ ushm_smart_probe_disk() {
     fi
   fi
 
-  if (( realloc >= SMART_REALLOC_WARN )); then
-    ushm_add_alert 1 "SMART" "${name}: Reallocated_Sector_Ct=${realloc} (Disk zeigt umgelagerte Sektoren)"
-  fi
-  if (( pending >= SMART_PENDING_WARN )); then
-    ushm_add_alert 2 "SMART" "${name}: Current_Pending_Sector=${pending} – kritische Sektoren wartend"
-  fi
-  if (( uncorr >= SMART_UNCORR_WARN )); then
-    ushm_add_alert 2 "SMART" "${name}: Offline_Uncorrectable=${uncorr}"
-  fi
-  if (( reported >= SMART_REALLOC_WARN )); then
-    ushm_add_alert 1 "SMART" "${name}: Reported_Uncorrect=${reported}"
-  fi
-  if (( crc >= SMART_CRC_WARN )); then
-    ushm_add_alert 1 "SMART" "${name}: UDMA_CRC_Error_Count=${crc} (Kabel/Controller?)"
+  # Einzelalarme nur wenn Health nicht schon FAILED (sonst doppelt)
+  if [[ "$health" != "FAILED" ]]; then
+    if (( realloc >= SMART_REALLOC_WARN )); then
+      ushm_add_alert 1 "SMART" "${name}: Reallocated_Sector_Ct=${realloc} (umgelagerte Sektoren)"
+    fi
+    if (( pending >= SMART_PENDING_WARN )); then
+      ushm_add_alert 2 "SMART" "${name}: Current_Pending_Sector=${pending} – kritische Sektoren wartend"
+    fi
+    if (( uncorr >= SMART_UNCORR_WARN )); then
+      ushm_add_alert 2 "SMART" "${name}: Offline_Uncorrectable=${uncorr}"
+    fi
+    if (( reported >= SMART_REALLOC_WARN )); then
+      ushm_add_alert 1 "SMART" "${name}: Reported_Uncorrect=${reported}"
+    fi
+    if (( crc >= SMART_CRC_WARN )); then
+      ushm_add_alert 1 "SMART" "${name}: UDMA_CRC_Error_Count=${crc} (Kabel/Controller?)"
+    fi
   fi
 
   if ushm_is_true "${SMART_DELTA_ALERT:-true}"; then
@@ -269,7 +376,7 @@ ushm_smart_probe_disk() {
 
 ushm_smart_format_report() {
   # SMART_LINES: status|type|name|detail → gruppiert nach Typ
-  local summary="SMART Scope=${SMART_SCOPE} · OK=${SMART_OK_COUNT:-0}  Standby=${SMART_STANDBY_COUNT:-0}  Failed=${SMART_FAIL_COUNT:-0}"
+  local summary="SMART Scope=${SMART_SCOPE} · OK=${SMART_OK_COUNT:-0}  Standby=${SMART_STANDBY_COUNT:-0}  Failed=${SMART_FAIL_COUNT:-0}  N/V=${SMART_UNAVAIL_COUNT:-0}"
   local out_lines=("$summary")
 
   if (( ${#SMART_LINES[@]} == 0 )); then
@@ -278,7 +385,6 @@ ushm_smart_format_report() {
     return 0
   fi
 
-  # Sort: Parity, Data, Cache, then name
   local sorted
   sorted=$(printf '%s\n' "${SMART_LINES[@]}" | awk -F'|' '{
     t=tolower($2)
@@ -297,13 +403,7 @@ ushm_smart_format_report() {
       out_lines+=("")
       out_lines+=("--- ${label} ---")
     fi
-    if [[ "$status" == "STANDBY" ]]; then
-      out_lines+=("  ${name}: Standby – SMART übersprungen")
-    elif [[ "$status" == "SKIP" ]]; then
-      out_lines+=("  ${name}: ${detail}")
-    else
-      out_lines+=("  ${name}: ${detail}")
-    fi
+    out_lines+=("  ${name}: ${detail}")
   done <<<"$sorted"
 
   printf '%s\n' "${out_lines[@]}"
@@ -316,6 +416,7 @@ ushm_check_smart() {
   SMART_OK_COUNT=0
   SMART_STANDBY_COUNT=0
   SMART_FAIL_COUNT=0
+  SMART_UNAVAIL_COUNT=0
 
   if ! ushm_is_true "${USHM_SMART_ENABLED:-true}"; then
     ushm_debug "SMART-Modul deaktiviert (USHM_SMART_ENABLED=false)"
