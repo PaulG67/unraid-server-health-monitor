@@ -30,10 +30,12 @@ source "${USHM_HOME}/lib/alerts.sh"
 source "${USHM_HOME}/lib/mail.sh"
 # shellcheck source=lib/pushover.sh
 source "${USHM_HOME}/lib/pushover.sh"
+# shellcheck source=lib/state.sh
+source "${USHM_HOME}/lib/state.sh"
 
-# Optionale Module (ab v2.0 / v2.5 / v3.0)
-[[ -f "${USHM_HOME}/modules/smart.sh" ]] && source "${USHM_HOME}/modules/smart.sh"
+# Module: Array vor SMART (Parity-Liste wird wiederverwendet)
 [[ -f "${USHM_HOME}/modules/array.sh" ]] && source "${USHM_HOME}/modules/array.sh"
+[[ -f "${USHM_HOME}/modules/smart.sh" ]] && source "${USHM_HOME}/modules/smart.sh"
 [[ -f "${USHM_HOME}/modules/dashboard.sh" ]] && source "${USHM_HOME}/modules/dashboard.sh"
 
 USHM_MODE=run
@@ -113,6 +115,8 @@ ushm_test_notify() {
   GROWTH_DELTAS=()
   USHM_SEVERITY=0
   USHM_ALERTS=()
+  PARITY_REPORT="(Notify-Test)"
+  SMART_REPORT="(Notify-Test)"
   ushm_add_alert 1 "Test" "Dies ist ein USHM Notify-Test. Wenn du das siehst, funktioniert der Versand."
 
   local rc=0
@@ -162,25 +166,32 @@ ushm_run() {
   ushm_info "=== USHM v$(cat "${USHM_HOME}/VERSION") start ==="
   ushm_load_config
 
-  # Checks (Reihenfolge wichtig: AppData vor Growth)
-  ushm_info "[1/5] Cache…"
+  # Defaults für Report/Historie wenn Module aus
+  PARITY_NAMES=()
+  PARITY_REPORT=""
+  SMART_REPORT=""
+  SMART_LINES=()
+
+  # Checks (Reihenfolge: AppData vor Growth; Array vor SMART)
+  ushm_info "[1/7] Cache…"
   ushm_check_cache || true
-  ushm_info "[2/5] Docker…"
+  ushm_info "[2/7] Docker…"
   ushm_check_docker || true
-  ushm_info "[3/5] AppData…"
+  ushm_info "[3/7] AppData…"
   ushm_check_appdata || true
-  ushm_info "[4/5] Wachstum…"
+  ushm_info "[4/7] Wachstum…"
   ushm_check_growth || true
 
-  # Optionale Module
-  if declare -F ushm_check_smart >/dev/null; then
-    ushm_check_smart || true
-  fi
+  ushm_info "[5/7] Parität / Array…"
   if declare -F ushm_check_array >/dev/null; then
     ushm_check_array || true
   fi
+  ushm_info "[6/7] SMART (Parity)…"
+  if declare -F ushm_check_smart >/dev/null; then
+    ushm_check_smart || true
+  fi
 
-  ushm_info "[5/5] Historie + Report…"
+  ushm_info "[7/7] Historie + Report…"
   ushm_history_write
   echo
   ushm_print_dashboard

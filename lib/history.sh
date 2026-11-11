@@ -54,5 +54,38 @@ ushm_history_write() {
     done
   fi
 
+  # Parity I/O-Fehler Historie
+  if (( ${#PARITY_NAMES[@]} > 0 )); then
+    local parity_hist="${hist_dir}/parity.csv"
+    if [[ ! -f "$parity_hist" ]]; then
+      echo "timestamp,name,device,status,num_errors,delta_errors,temp" >"$parity_hist"
+    fi
+    local i
+    for i in "${!PARITY_NAMES[@]}"; do
+      printf '%s,%s,%s,%s,%s,%s,%s\n' \
+        "$ts" \
+        "${PARITY_NAMES[$i]}" \
+        "${PARITY_DEVICES[$i]:-}" \
+        "${PARITY_STATUS[$i]:-}" \
+        "${PARITY_ERRORS[$i]:-0}" \
+        "${PARITY_DELTA_ERRORS[$i]:-0}" \
+        "${PARITY_TEMP[$i]:-}" \
+        >>"$parity_hist"
+    done
+  fi
+
+  # SMART Snapshot (eine Zeile pro SMART_LINES-Eintrag grob; Detail in state/)
+  if [[ -n "${SMART_REPORT:-}" && "$SMART_REPORT" != "(keine Daten)" && "$SMART_REPORT" != "(smartctl fehlt)" ]]; then
+    local smart_hist="${hist_dir}/smart_${date_day}.csv"
+    if [[ ! -f "$smart_hist" ]]; then
+      echo "timestamp,line" >"$smart_hist"
+    fi
+    local sline
+    while IFS= read -r sline; do
+      [[ -z "$sline" ]] && continue
+      printf '%s,"%s"\n' "$ts" "${sline//\"/\'}" >>"$smart_hist"
+    done <<<"$SMART_REPORT"
+  fi
+
   ushm_info "Historie geschrieben nach $hist_dir"
 }

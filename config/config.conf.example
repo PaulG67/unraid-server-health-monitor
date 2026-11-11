@@ -70,13 +70,34 @@ LOG_CRIT_MB=2000
 DOCKER_LAYER_WARN=0
 DOCKER_LAYER_CRIT=0
 
-# SMART Temperatur in °C (v2.0 – schon konfigurierbar)
+# SMART Temperatur in °C
 SMART_WARN=55
 SMART_CRIT=65
 
-# SSD Remaining Life in Prozent (v2.0)
+# SSD Remaining Life in Prozent (später / alle Disks)
 SSD_LIFE_WARN=20
 SSD_LIFE_CRIT=10
+
+#############################
+# Parity & SMART (v2.0)
+#############################
+
+# Array/Parity I/O-Fehler (numErrors aus disks.ini) – parity + parity2
+USHM_ARRAY_ENABLED=true
+# Ab wie vielen I/O-Fehlern warnen / kritisch (Delta seit letztem Lauf = Crit)
+PARITY_ERROR_WARN=1
+PARITY_ERROR_CRIT=1
+
+# SMART der Parity-Disk(s); später SMART_SCOPE=all für alle Array-Disks
+USHM_SMART_ENABLED=true
+SMART_SCOPE=parity
+# Absolute SMART-Schwellwerte (Warnung ab diesem RAW-Wert)
+SMART_REALLOC_WARN=1
+SMART_PENDING_WARN=1
+SMART_UNCORR_WARN=1
+SMART_CRC_WARN=10
+# true = jede Erhöhung seit letztem Lauf alarmieren
+SMART_DELTA_ALERT=true
 
 #############################
 # Verhalten

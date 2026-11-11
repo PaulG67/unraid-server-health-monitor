@@ -39,6 +39,18 @@ Container Logs: $(ushm_bytes_human "${DOCKER_LOG_BYTES:-0}")
 
 $(ushm_hr)
 
+Parity (Array I/O)
+
+${PARITY_REPORT:-(keine Daten)}
+
+$(ushm_hr)
+
+SMART (Parity-Disk)
+
+${SMART_REPORT:-(keine Daten)}
+
+$(ushm_hr)
+
 Top AppData
 
 ${APPDATA_TOP:-(keine Daten)}
@@ -82,6 +94,18 @@ ushm_report_pushover() {
   lines+=("Docker: ${DOCKER_PCT:-?}%")
   lines+=("AppData: $(ushm_bytes_human "${APPDATA_TOTAL_BYTES:-0}")")
   lines+=("Logs: $(ushm_bytes_human "${DOCKER_LOG_BYTES:-0}")")
+  if [[ -n "${PARITY_REPORT:-}" && "$PARITY_REPORT" != "(keine Daten)" ]]; then
+    local pline
+    while IFS= read -r pline; do
+      [[ -n "$pline" ]] && lines+=("Parity: $pline")
+    done <<<"$PARITY_REPORT"
+  fi
+  if [[ -n "${SMART_REPORT:-}" && "$SMART_REPORT" != "(keine Daten)" ]]; then
+    local sline
+    while IFS= read -r sline; do
+      [[ -n "$sline" ]] && lines+=("SMART: $sline")
+    done <<<"$SMART_REPORT"
+  fi
   lines+=("Status: $(ushm_severity_label)")
 
   if (( ${#USHM_ALERTS[@]} > 0 )); then
@@ -179,6 +203,12 @@ ushm_report_html() {
         </td>
       </tr>
     </table>
+
+    <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">Parity (Array I/O)</h3>
+    <pre style="margin:0;padding:12px;background:#0f172a;border-radius:8px;color:#cbd5e1;font-size:12px;white-space:pre-wrap;">${PARITY_REPORT:-(keine Daten)}</pre>
+
+    <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">SMART (Parity-Disk)</h3>
+    <pre style="margin:0;padding:12px;background:#0f172a;border-radius:8px;color:#cbd5e1;font-size:12px;white-space:pre-wrap;">${SMART_REPORT:-(keine Daten)}</pre>
 
     <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">Top AppData</h3>
     <table style="width:100%;border-collapse:collapse;font-size:14px;color:#f1f5f9;">${app_rows}</table>

@@ -60,7 +60,7 @@ Unraid-Server-Health-Monitor/
 │   ├── config.conf         # deine Konfiguration (lokal, nicht im Git)
 │   └── config.conf.example
 ├── lib/                    # Module
-├── modules/                # Erweiterungen (SMART/Array später)
+├── modules/                # Array/Parity + SMART (v2.0)
 └── data/
     ├── history/            # CSV-Historie
     └── state/              # Snapshots für Wachstum
@@ -175,8 +175,24 @@ Ab **v1.0.6** misst USHM den Cache mit Kernel-`statvfs` / `df` (nutzbare Größe
 bash /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/ushm.sh --dry-run
 ```
 
-Erwartet: Fortschritt `[1/5]…[5/5]` und Text-Dashboard.  
+Erwartet: Fortschritt `[1/7]…[7/7]` und Text-Dashboard inkl. **Parity** und **SMART**.  
 AppData-Scan kann bei großen Containern (Immich, Plex, …) **1–5 Minuten** dauern.
+
+### Parity & SMART (v2.0)
+
+Standardmäßig aktiv (`USHM_ARRAY_ENABLED=true`, `USHM_SMART_ENABLED=true`):
+
+| Was | Quelle | Alarm |
+|-----|--------|--------|
+| Array-I/O-Fehler Parity | `disks.ini` → `numErrors` | vorhanden / **Anstieg** seit letztem Lauf |
+| Disk-Status | `status` / `color` | disabled / rot |
+| SMART „kränkelt“ | `smartctl` | Reallocated, Pending, Uncorrectable, CRC, Temp |
+| SMART-Änderung | `data/state/smart_*.env` | Wert **steigt** → Crit/Warn |
+
+`parity2` wird automatisch mitüberwacht, sobald in Unraid vorhanden.  
+Default `SMART_SCOPE=parity` (nur Parity-Disks, kein unnötiges Aufwecken aller HDDs).
+
+Voraussetzung SMART: Paket **smartmontools** (`smartctl` im Pfad).
 
 ### 3.2 Mail & Pushover testen
 
@@ -320,7 +336,9 @@ Beim **ersten** Lauf gibt es noch kein Wachstum – ab dem **zweiten** Lauf ersc
 | Script in User Scripts leer | Installer ausführen oder Wrapper von Abschnitt 4 einfügen |
 | `ushm.sh: No such file or directory` unter `/tmp/user.scripts/...` | User Scripts kopiert nur `script` nach `/tmp`. Wrapper muss den **absoluten** Pfad unter `/boot/config/...` aufrufen (Installer ab Fix 2026-07-28). Sofort-Fix: Inhalt von Abschnitt 4 in das Script einfügen |
 | `git pull` → `Permission denied (publickey)` / alte VERSION | Remote im `/boot`-Ordner ist nicht GitHub. Update wie Abschnitt 5: `/tmp` + `git clone https://github.com/PaulG67/...` + `install.sh` |
-| Cache „von 1.8 TB“ bei 2×1 TB RAID1 | alte Version (&lt; 1.0.6) oder Btrfs Device-Summe. Update auf ≥1.0.6, Log muss `USHM v1.0.6` zeigen |
+| Cache „von 1.8 TB“ bei 2×1 TB RAID1 | alte Version (&lt; 1.0.6) oder Btrfs Device-Summe. Update auf ≥1.0.6, Log muss aktuelle `USHM v…` zeigen |
+| SMART übersprungen / fehlt | `smartctl` installieren (Nerd Tools / smartmontools). Standby-Disks werden bewusst nicht aufgeweckt |
+| Parity „keine Disk“ | Array gestoppt oder keine Parity in `disks.ini` – Main-Tab prüfen |
 
 ---
 

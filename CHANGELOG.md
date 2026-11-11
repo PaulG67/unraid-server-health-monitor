@@ -2,6 +2,21 @@
 
 Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 
+## [2.0.0] – 2026-11-11
+
+### Added
+
+- **Parity-Monitoring** (Array I/O): liest `parity` und `parity2` aus `disks.ini` (`numErrors`, Status, Temp).
+- **SMART der Parity-Disk(s)**: Health, Temperatur, Reallocated / Pending / Offline Uncorrectable / CRC.
+- **Fehler-Deltas**: Vergleich mit `data/state/` – Alarm wenn I/O- oder SMART-Werte seit dem letzten Lauf steigen (erster Lauf = Baseline).
+- Report/Mail/Pushover-Abschnitte „Parity“ und „SMART“; CSV `parity.csv` + `smart_YYYY-MM-DD.csv`.
+- Config: `USHM_ARRAY_ENABLED`, `USHM_SMART_ENABLED`, `SMART_SCOPE=parity|all`, Schwellwerte.
+
+### Notes
+
+- `SMART_SCOPE=parity` (Default) weckt nicht alle Array-Disks; Standby-Disks werden übersprungen (`smartctl -n standby`).
+- Spätere zweite Parity-Disk (`parity2`) wird automatisch mitüberwacht.
+
 ## [1.0.6] – 2026-08-03
 
 ### Fixed
