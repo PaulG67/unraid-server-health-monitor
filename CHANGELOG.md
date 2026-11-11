@@ -2,6 +2,14 @@
 
 Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 
+## [2.1.2] – 2026-11-11
+
+### Fixed / Improved
+
+- **Parity-Sync/Rebuild**: `DISK_INVALID` während aktiver Sync (`mdResyncPos>0`) wird **orange** angezeigt und nicht als Fehler gewertet; Hinweis mit Fortschritt.
+- Sync-Erkennung korrigiert (nur bei laufendem Sync, nicht allein wegen `mdResyncSize`).
+- SMART-Fehler der Parity-Disk werden weiterhin getrennt erkannt und alarmiert.
+
 ## [2.1.1] – 2026-11-11
 
 ### Fixed / Improved

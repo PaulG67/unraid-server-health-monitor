@@ -2,7 +2,7 @@
 
 Zentrales Monitoring für Unraid – Cache, Docker, AppData-Wachstum, Alarme per Mail & Pushover.
 
-**Version:** 2.1.1 · **Kein Docker** – Bash-Skript für [User Scripts](https://forums.unraid.net/topic/48286-plugin-ca-user-scripts/)
+**Version:** 2.1.2 · **Kein Docker** – Bash-Skript für [User Scripts](https://forums.unraid.net/topic/48286-plugin-ca-user-scripts/)
 
 📘 **Weitergeben / Nachbauen:** → **[Installations- & Konfigurationsanleitung](docs/INSTALL.md)**
 
@@ -63,7 +63,7 @@ cd /tmp
 rm -rf ushm
 git clone https://github.com/PaulG67/unraid-server-health-monitor.git ushm
 cd ushm
-cat VERSION   # erwartet 2.1.1+
+cat VERSION   # erwartet 2.1.2+
 bash install.sh
 cat /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/VERSION
 bash /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/ushm.sh --dry-run 2>&1 | grep -E 'USHM v|Cache:|Inventar|Disk|SMART'

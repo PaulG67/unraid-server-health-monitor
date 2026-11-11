@@ -238,6 +238,7 @@ ushm_check_array() {
   ARRAY_MD_STATE=""
   ARRAY_SYNC_ERRS=""
   ARRAY_RESYNC=""
+  ARRAY_SYNCING=0
 
   # Inventar immer zuerst (auch wenn Array-I/O aus)
   ushm_check_disk_inventory || true
@@ -258,13 +259,25 @@ ushm_check_array() {
 
   ARRAY_MD_STATE=$(ushm_array_var_flat "mdState")
   ARRAY_SYNC_ERRS=$(ushm_array_var_flat "sbSyncErrs")
-  local resync_pos resync_size resync_action
+  local resync_pos resync_size resync_action md_resync sync_pct=0
+  ARRAY_SYNCING=0
   resync_pos=$(ushm_array_var_flat "mdResyncPos")
   resync_size=$(ushm_array_var_flat "mdResyncSize")
   resync_action=$(ushm_array_var_flat "mdResyncAction")
-  if [[ -n "$resync_pos" && -n "$resync_size" && "$resync_size" =~ ^[0-9]+$ && "$resync_size" -gt 0 ]]; then
-    local pct=$(( resync_pos * 100 / resync_size ))
-    ARRAY_RESYNC="${resync_action:-resync} ${pct}%"
+  md_resync=$(ushm_array_var_flat "mdResync")
+  # Aktiv nur wenn Position > 0 (mdResyncSize ist auch ohne Sync gesetzt)
+  if [[ "$resync_pos" =~ ^[0-9]+$ ]] && (( resync_pos > 0 )); then
+    ARRAY_SYNCING=1
+  elif [[ "$md_resync" =~ ^[0-9]+$ ]] && (( md_resync > 0 )); then
+    ARRAY_SYNCING=1
+  fi
+  if (( ARRAY_SYNCING == 1 )); then
+    if [[ "$resync_size" =~ ^[0-9]+$ ]] && (( resync_size > 0 )) && [[ "$resync_pos" =~ ^[0-9]+$ ]]; then
+      sync_pct=$(( resync_pos * 100 / resync_size ))
+      (( sync_pct > 100 )) && sync_pct=100
+    fi
+    local act="${resync_action:-Parity-Sync}"
+    ARRAY_RESYNC="${act} ${sync_pct}%"
   fi
 
   [[ -z "$ARRAY_SYNC_ERRS" ]] && ARRAY_SYNC_ERRS=0
@@ -291,7 +304,14 @@ ushm_check_array() {
   }' | sort -t$'\t' -k1,1n -k2,2 | cut -f2-)
 
   local header_lines=()
-  header_lines+=("Array: ${ARRAY_MD_STATE:-?} · SyncErrs: ${sync_disp}${ARRAY_RESYNC:+ · ${ARRAY_RESYNC}}")
+  local resync_disp=""
+  if (( ARRAY_SYNCING == 1 )); then
+    resync_disp=" · $(ushm_c_yel "${ARRAY_RESYNC}")"
+  fi
+  header_lines+=("Array: ${ARRAY_MD_STATE:-?} · SyncErrs: ${sync_disp}${resync_disp}")
+  if (( ARRAY_SYNCING == 1 )); then
+    header_lines+=("$(ushm_c_yel "Sync/Rebuild aktiv") – DISK_INVALID währenddessen erwartbar (kein Fehler)")
+  fi
   (( empty_slots > 0 )) && header_lines+=("Hinweis: ${empty_slots} leere Array-Slots ausgeblendet")
   if [[ -n "${DISK_INVENTORY_REPORT:-}" ]]; then
     local iline
@@ -303,6 +323,7 @@ ushm_check_array() {
   local section_lines=()
   local cur_section=""
   local name typ device status errors temp color id
+  local sync_invalid_noted=0
 
   while IFS=$'\t' read -r name typ device status errors temp color id; do
     [[ -z "$name" || -z "$device" ]] && continue
@@ -324,9 +345,8 @@ ushm_check_array() {
       section_lines+=("--- ${section_label} ---")
     fi
 
-    local state_key="diskio_${name}"
     local state_file prev delta have_prev=0
-    state_file=$(ushm_state_file "$state_key")
+    state_file=$(ushm_state_file "diskio_${name}")
     # Legacy: Parity nutzte parity_<name>
     if [[ "$typ_l" == "parity" && ! -f "$state_file" ]]; then
       local legacy
@@ -345,7 +365,6 @@ ushm_check_array() {
     (( delta < 0 )) && delta=0
     (( have_prev == 0 )) && delta=0
 
-    # State immer unter diskio_* speichern (einheitlich)
     local save_file
     save_file=$(ushm_state_file "diskio_${name}")
     ushm_state_set_many "$save_file" \
@@ -379,17 +398,37 @@ ushm_check_array() {
       crit_th=$DISK_ERROR_CRIT
     fi
 
-    # Farbige Werte: Status / I/O / Temp
+    # DISK_INVALID während Sync/Rebuild = erwartbar (orange), sonst kritisch (rot)
+    local syncing_invalid=0
+    if (( ARRAY_SYNCING == 1 )); then
+      case "${status^^}" in
+        DISK_INVALID|DISK_DSBL_NEW|DISK_NEW)
+          syncing_invalid=1
+          ;;
+      esac
+      # Unraid: gelb = invalid während Reconstruct
+      if [[ "${color,,}" == yellow* ]]; then
+        syncing_invalid=1
+      fi
+    fi
+
     local status_disp="${status:-?}"
-    case "${status^^}" in
-      DISK_OK) ;;
-      DISK_DSBL|DISK_NP_DSBL|DISK_NP_MISSING|DISK_INVALID|DISK_WRONG|DISK_DSBL_NEW)
-        status_disp="$(ushm_c_red "$status_disp")"
-        ;;
-      *)
-        [[ "${color,,}" == *"red"* ]] && status_disp="$(ushm_c_red "$status_disp")"
-        ;;
-    esac
+    local status_note=""
+    if (( syncing_invalid == 1 )); then
+      status_disp="$(ushm_c_yel "${status:-INVALID}")"
+      status_note="  $(ushm_c_yel "[Sync ${sync_pct}% – erwartbar]")"
+    else
+      case "${status^^}" in
+        DISK_OK) ;;
+        DISK_DSBL|DISK_NP_DSBL|DISK_NP_MISSING|DISK_INVALID|DISK_WRONG|DISK_DSBL_NEW)
+          status_disp="$(ushm_c_red "$status_disp")"
+          ;;
+        *)
+          [[ "${color,,}" == *"red"* ]] && status_disp="$(ushm_c_red "$status_disp")"
+          [[ "${color,,}" == yellow* ]] && status_disp="$(ushm_c_yel "$status_disp")"
+          ;;
+      esac
+    fi
 
     local io_disp="$errors"
     if (( errors >= crit_th )) || (( delta > 0 && errors > 0 )); then
@@ -408,9 +447,8 @@ ushm_check_array() {
     fi
 
     local dev_txt="${device:-—}"
-    section_lines+=("  ${name}: ${status_disp}  I/O=${io_disp}${delta_txt}  T=${temp_disp}°C  /dev/${dev_txt}")
+    section_lines+=("  ${name}: ${status_disp}  I/O=${io_disp}${delta_txt}  T=${temp_disp}°C  /dev/${dev_txt}${status_note}")
 
-    # Parity-Arrays für Historie / SMART-Fallback
     if [[ "$typ_l" == "parity" ]]; then
       PARITY_NAMES+=("$name")
       PARITY_DEVICES+=("$device")
@@ -422,13 +460,20 @@ ushm_check_array() {
       PARITY_ID+=("${id:-}")
     fi
 
-    case "${status^^}" in
-      DISK_DSBL|DISK_NP_DSBL|DISK_NP_MISSING|DISK_INVALID|DISK_WRONG|DISK_DSBL_NEW)
-        ushm_add_alert 2 "$cat_label" "${name}: Status ${status} – Disk ersetzen/prüfen"
-        ;;
-    esac
-    if [[ "${color,,}" == *"red"* ]]; then
-      ushm_add_alert 2 "$cat_label" "${name}: Unraid meldet rot (color=${color})"
+    if (( syncing_invalid == 1 )); then
+      if (( sync_invalid_noted == 0 )); then
+        sync_invalid_noted=1
+        ushm_add_alert 1 "Parity" "${name}: Status ${status} während Sync/Rebuild (${ARRAY_RESYNC}) – erwartbar, kein Fehler bis Abschluss"
+      fi
+    else
+      case "${status^^}" in
+        DISK_DSBL|DISK_NP_DSBL|DISK_NP_MISSING|DISK_INVALID|DISK_WRONG|DISK_DSBL_NEW)
+          ushm_add_alert 2 "$cat_label" "${name}: Status ${status} – Disk ersetzen/prüfen"
+          ;;
+      esac
+      if [[ "${color,,}" == *"red"* ]]; then
+        ushm_add_alert 2 "$cat_label" "${name}: Unraid meldet rot (color=${color})"
+      fi
     fi
 
     if (( have_prev == 1 )) && (( errors >= crit_th )) && (( delta > 0 )); then
@@ -441,7 +486,7 @@ ushm_check_array() {
       fi
     fi
 
-    ushm_debug "${typ} ${name}: errors=${errors} delta=+${delta} status=${status}"
+    ushm_debug "${typ} ${name}: errors=${errors} delta=+${delta} status=${status} syncing_invalid=${syncing_invalid}"
   done <<<"$list"
 
   PARITY_REPORT=$(printf '%s\n' "${header_lines[@]}" "${section_lines[@]}")
