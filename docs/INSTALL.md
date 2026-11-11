@@ -60,7 +60,7 @@ Unraid-Server-Health-Monitor/
 │   ├── config.conf         # deine Konfiguration (lokal, nicht im Git)
 │   └── config.conf.example
 ├── lib/                    # Module
-├── modules/                # Array/Parity + SMART (v2.0)
+├── modules/                # Inventar + Array/Disks + SMART (v2.1)
 └── data/
     ├── history/            # CSV-Historie
     └── state/              # Snapshots für Wachstum
@@ -175,22 +175,23 @@ Ab **v1.0.6** misst USHM den Cache mit Kernel-`statvfs` / `df` (nutzbare Größe
 bash /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/ushm.sh --dry-run
 ```
 
-Erwartet: Fortschritt `[1/7]…[7/7]` und Text-Dashboard inkl. **Parity** und **SMART**.  
+Erwartet: Fortschritt `[1/7]…[7/7]` und Text-Dashboard inkl. **Inventar**, **Disks** und **SMART**.  
 AppData-Scan kann bei großen Containern (Immich, Plex, …) **1–5 Minuten** dauern.
 
-### Parity & SMART (v2.0)
+### Disks, Inventar & SMART (v2.1)
 
-Standardmäßig aktiv (`USHM_ARRAY_ENABLED=true`, `USHM_SMART_ENABLED=true`):
+Standardmäßig aktiv (`USHM_INVENTORY_ENABLED`, `USHM_ARRAY_ENABLED`, `USHM_SMART_ENABLED`):
 
 | Was | Quelle | Alarm |
 |-----|--------|--------|
-| Array-I/O-Fehler Parity | `disks.ini` → `numErrors` | vorhanden / **Anstieg** seit letztem Lauf |
+| Inventar-Vollständigkeit | `disks.ini` vs. `data/state/disk_inventory` | Disk **hinzu** / **fehlt** / **ersetzt** |
+| Array-I/O aller Disks | `numErrors` (Parity, Data, Cache) | vorhanden / **Anstieg** |
 | Disk-Status | `status` / `color` | disabled / rot |
-| SMART „kränkelt“ | `smartctl` | Reallocated, Pending, Uncorrectable, CRC, Temp |
+| SMART aller Disks | `smartctl` | Reallocated, Pending, Uncorrectable, CRC, Temp |
 | SMART-Änderung | `data/state/smart_*.env` | Wert **steigt** → Crit/Warn |
 
-`parity2` wird automatisch mitüberwacht, sobald in Unraid vorhanden.  
-Default `SMART_SCOPE=parity` (nur Parity-Disks, kein unnötiges Aufwecken aller HDDs).
+Report gruppiert nach **Parity / Data / Cache**. `parity2` wird automatisch erkannt.  
+Default `SMART_SCOPE=all` (Standby-Disks werden **nicht** aufgeweckt). Für nur Parity: `SMART_SCOPE=parity`.
 
 Voraussetzung SMART: Paket **smartmontools** (`smartctl` im Pfad).
 

@@ -2,7 +2,7 @@
 
 Zentrales Monitoring für Unraid – Cache, Docker, AppData-Wachstum, Alarme per Mail & Pushover.
 
-**Version:** 2.0.0 · **Kein Docker** – Bash-Skript für [User Scripts](https://forums.unraid.net/topic/48286-plugin-ca-user-scripts/)
+**Version:** 2.1.0 · **Kein Docker** – Bash-Skript für [User Scripts](https://forums.unraid.net/topic/48286-plugin-ca-user-scripts/)
 
 📘 **Weitergeben / Nachbauen:** → **[Installations- & Konfigurationsanleitung](docs/INSTALL.md)**
 
@@ -24,16 +24,17 @@ Status
 🟢 OK
 ```
 
-## Features (v2.0)
+## Features (v2.1)
 
 | Bereich | Prüfung |
 |--------|---------|
 | Cache SSD | freier Speicher (nutzbar, RAID1-richtig) |
 | Docker | Image-Belegung, Container-Logs |
 | AppData | Top-N + Wachstum seit letztem Lauf |
-| **Parity** | I/O-Fehler (`numErrors`), Status – inkl. spätere `parity2` |
-| **SMART** | Health, Temp, Reallocated/Pending/CRC der Parity-Disk(s) + **Änderungen** |
-| Historie | CSV inkl. parity/smart |
+| **Inventar** | Disks hinzugekommen / entfernt / ersetzt (beim Start) |
+| **Disks** | Parity + Data + Cache: Status, I/O-`numErrors`, Temp, Deltas |
+| **SMART** | Health, Temp, Reallocated/Pending/CRC **aller** Disks + Änderungen |
+| Historie | CSV inkl. inventory/parity/smart |
 | Mail | SMTP, STARTTLS, HTML-Report |
 | Pushover | Daily / Warnung / Kritisch |
 
@@ -62,10 +63,10 @@ cd /tmp
 rm -rf ushm
 git clone https://github.com/PaulG67/unraid-server-health-monitor.git ushm
 cd ushm
-cat VERSION   # erwartet 2.0.0+
+cat VERSION   # erwartet 2.1.0+
 bash install.sh
 cat /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/VERSION
-bash /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/ushm.sh --dry-run 2>&1 | grep -E 'USHM v|Cache:|Parity|SMART'
+bash /boot/config/plugins/user.scripts/scripts/Unraid-Server-Health-Monitor/ushm.sh --dry-run 2>&1 | grep -E 'USHM v|Cache:|Inventar|Disk|SMART'
 ```
 
 Details: **[docs/INSTALL.md §5 Updates](docs/INSTALL.md#5-updates)**

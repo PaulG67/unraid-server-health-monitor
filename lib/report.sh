@@ -39,13 +39,13 @@ Container Logs: $(ushm_bytes_human "${DOCKER_LOG_BYTES:-0}")
 
 $(ushm_hr)
 
-Parity (Array I/O)
+Disks / Parität (Inventar + Array I/O)
 
 ${PARITY_REPORT:-(keine Daten)}
 
 $(ushm_hr)
 
-SMART (Parity-Disk)
+SMART (alle Disks)
 
 ${SMART_REPORT:-(keine Daten)}
 
@@ -90,20 +90,45 @@ EOF
 
 ushm_report_pushover() {
   local lines=()
+  DISK_INVENTORY_ADDED=("${DISK_INVENTORY_ADDED[@]+"${DISK_INVENTORY_ADDED[@]}"}")
+  DISK_INVENTORY_REMOVED=("${DISK_INVENTORY_REMOVED[@]+"${DISK_INVENTORY_REMOVED[@]}"}")
+  DISK_INVENTORY_REPLACED=("${DISK_INVENTORY_REPLACED[@]+"${DISK_INVENTORY_REPLACED[@]}"}")
   lines+=("Cache: $(ushm_bytes_human "${CACHE_AVAIL:-0}") free of $(ushm_bytes_human "${CACHE_TOTAL:-0}") (${CACHE_PCT_USED:-?}% used)")
   lines+=("Docker: ${DOCKER_PCT:-?}%")
   lines+=("AppData: $(ushm_bytes_human "${APPDATA_TOTAL_BYTES:-0}")")
   lines+=("Logs: $(ushm_bytes_human "${DOCKER_LOG_BYTES:-0}")")
+  # Inventar-Änderungen kurz
+  if (( ${#DISK_INVENTORY_ADDED[@]} > 0 )); then
+    lines+=("Inventar +: ${DISK_INVENTORY_ADDED[*]}")
+  fi
+  if (( ${#DISK_INVENTORY_REMOVED[@]} > 0 )); then
+    lines+=("Inventar −: ${DISK_INVENTORY_REMOVED[*]}")
+  fi
+  if (( ${#DISK_INVENTORY_REPLACED[@]} > 0 )); then
+    lines+=("Inventar ↔: ${DISK_INVENTORY_REPLACED[*]}")
+  fi
+  # Disks: Kopf + Auffälligkeiten (Fehler / Delta)
   if [[ -n "${PARITY_REPORT:-}" && "$PARITY_REPORT" != "(keine Daten)" ]]; then
-    local pline
+    local pline pcount=0
     while IFS= read -r pline; do
-      [[ -n "$pline" ]] && lines+=("Parity: $pline")
+      [[ -z "$pline" ]] && continue
+      if [[ "$pline" == Array:* || "$pline" == Disks* || "$pline" == *Hinzugekommen* || "$pline" == *Entfernt* || "$pline" == *Ersetzt* || "$pline" == *Vollständig* || "$pline" == *\[+* || "$pline" == *"I/O="*[1-9]* ]]; then
+        lines+=("Disk: $pline")
+        pcount=$(( pcount + 1 ))
+      fi
+      (( pcount >= 8 )) && { lines+=("Disk: …"); break; }
     done <<<"$PARITY_REPORT"
   fi
+  # SMART: Zusammenfassung + Auffälligkeiten
   if [[ -n "${SMART_REPORT:-}" && "$SMART_REPORT" != "(keine Daten)" ]]; then
-    local sline
+    local sline scount=0
     while IFS= read -r sline; do
-      [[ -n "$sline" ]] && lines+=("SMART: $sline")
+      [[ -z "$sline" ]] && continue
+      if [[ "$sline" == SMART* || "$sline" == *FAILED* || "$sline" == *"Δ:"* || "$sline" == *"Realloc="*[1-9]* || "$sline" == *"Pending="*[1-9]* ]]; then
+        lines+=("SMART: $sline")
+        scount=$(( scount + 1 ))
+      fi
+      (( scount >= 8 )) && { lines+=("SMART: …"); break; }
     done <<<"$SMART_REPORT"
   fi
   lines+=("Status: $(ushm_severity_label)")
@@ -204,10 +229,10 @@ ushm_report_html() {
       </tr>
     </table>
 
-    <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">Parity (Array I/O)</h3>
+    <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">Disks / Parität (Inventar + Array I/O)</h3>
     <pre style="margin:0;padding:12px;background:#0f172a;border-radius:8px;color:#cbd5e1;font-size:12px;white-space:pre-wrap;">${PARITY_REPORT:-(keine Daten)}</pre>
 
-    <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">SMART (Parity-Disk)</h3>
+    <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">SMART (alle Disks)</h3>
     <pre style="margin:0;padding:12px;background:#0f172a;border-radius:8px;color:#cbd5e1;font-size:12px;white-space:pre-wrap;">${SMART_REPORT:-(keine Daten)}</pre>
 
     <h3 style="margin:20px 0 8px;font-size:14px;color:#94a3b8;text-transform:uppercase;">Top AppData</h3>

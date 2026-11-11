@@ -79,19 +79,23 @@ SSD_LIFE_WARN=20
 SSD_LIFE_CRIT=10
 
 #############################
-# Parity & SMART (v2.0)
+# Disks, Parity & SMART (v2.1)
 #############################
 
-# Array/Parity I/O-Fehler (numErrors aus disks.ini) – parity + parity2
+# Inventar: beim Start prüfen ob Disks hinzugekommen/entfernt/ersetzt wurden
+USHM_INVENTORY_ENABLED=true
+
+# Array I/O (numErrors) für Parity + Data + Cache – gruppiert im Report
 USHM_ARRAY_ENABLED=true
-# Ab wie vielen I/O-Fehlern warnen / kritisch (Delta seit letztem Lauf = Crit)
 PARITY_ERROR_WARN=1
 PARITY_ERROR_CRIT=1
+# Data/Cache I/O (Default = Parity-Schwellwerte)
+DISK_ERROR_WARN=1
+DISK_ERROR_CRIT=1
 
-# SMART der Parity-Disk(s); später SMART_SCOPE=all für alle Array-Disks
+# SMART aller Disks (parity|all). Standby-Disks werden nicht aufgeweckt.
 USHM_SMART_ENABLED=true
-SMART_SCOPE=parity
-# Absolute SMART-Schwellwerte (Warnung ab diesem RAW-Wert)
+SMART_SCOPE=all
 SMART_REALLOC_WARN=1
 SMART_PENDING_WARN=1
 SMART_UNCORR_WARN=1

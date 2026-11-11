@@ -21,7 +21,7 @@
 - [x] Cache-Pfad case-insensitive / Pool-Erkennung
 - [x] RAID1 nutzbare Größe (statvfs/df, kein Device-size×2)
 
-## v2.0 – Parity & SMART (aktuell)
+## v2.0 – Parity & SMART
 
 - [x] Parity I/O-Fehler (`numErrors`) aus disks.ini
 - [x] Parity Status (disabled / rot)
@@ -31,8 +31,14 @@
 - [x] Reallocated / Pending / Uncorrectable / CRC
 - [x] Deltas seit letztem Lauf + Alarme
 - [x] Integration Report + Historie
+
+## v2.1 – Alle Disks + Inventar (aktuell)
+
+- [x] Disk-Inventar: hinzu / entfernt / ersetzt
+- [x] I/O + Status für Parity, Data, Cache (gruppiert)
+- [x] SMART_SCOPE=all Default, Report gruppiert
+- [x] Standby ohne Spin-up
 - [ ] SMART Wear Level / Remaining Life / TBW (optional)
-- [ ] SMART_SCOPE=all als Default-Empfehlung dokumentieren (optional)
 
 ## v1.5 – Docker Deep Dive
 
@@ -43,8 +49,8 @@
 
 ## v2.5 – Array (erweitert)
 
-- [ ] Disabled Data-Disks
-- [ ] Read/Write-Fehler aller Array-Disks
+- [x] Read/Write-Fehler aller Array-Disks (numErrors)
+- [x] Disabled Data-Disks (Status-Alarm)
 - [ ] Rebuild-Fortschritt detailliert
 - [ ] mdcmd Integration
 

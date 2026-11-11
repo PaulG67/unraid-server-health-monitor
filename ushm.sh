@@ -117,6 +117,9 @@ ushm_test_notify() {
   USHM_ALERTS=()
   PARITY_REPORT="(Notify-Test)"
   SMART_REPORT="(Notify-Test)"
+  DISK_INVENTORY_ADDED=()
+  DISK_INVENTORY_REMOVED=()
+  DISK_INVENTORY_REPLACED=()
   ushm_add_alert 1 "Test" "Dies ist ein USHM Notify-Test. Wenn du das siehst, funktioniert der Versand."
 
   local rc=0
@@ -171,8 +174,12 @@ ushm_run() {
   PARITY_REPORT=""
   SMART_REPORT=""
   SMART_LINES=()
+  DISK_INVENTORY_REPORT=""
+  DISK_INVENTORY_ADDED=()
+  DISK_INVENTORY_REMOVED=()
+  DISK_INVENTORY_REPLACED=()
 
-  # Checks (Reihenfolge: AppData vor Growth; Array vor SMART)
+  # Checks (Inventar+Array vor SMART; AppData vor Growth)
   ushm_info "[1/7] Cache…"
   ushm_check_cache || true
   ushm_info "[2/7] Docker…"
@@ -182,11 +189,11 @@ ushm_run() {
   ushm_info "[4/7] Wachstum…"
   ushm_check_growth || true
 
-  ushm_info "[5/7] Parität / Array…"
+  ushm_info "[5/7] Inventar + Array (alle Disks)…"
   if declare -F ushm_check_array >/dev/null; then
     ushm_check_array || true
   fi
-  ushm_info "[6/7] SMART (Parity)…"
+  ushm_info "[6/7] SMART (alle Disks)…"
   if declare -F ushm_check_smart >/dev/null; then
     ushm_check_smart || true
   fi
@@ -204,7 +211,6 @@ ushm_run() {
   ushm_dispatch_alerts
 
   ushm_info "=== USHM fertig (Status: $(ushm_severity_label)) ==="
-  # Exit-Code bewusst setzen, ohne set -e auszulösen
   return 0
 }
 

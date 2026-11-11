@@ -2,6 +2,20 @@
 
 Alle wesentlichen Änderungen an USHM werden hier dokumentiert.
 
+## [2.1.0] – 2026-11-11
+
+### Added
+
+- **Disk-Inventar** beim Start: erkennt hinzugekommene, entfernte und ersetzte Disks (Slot/ID) und alarmiert.
+- **Alle Disks** im Report: Parity / Data / Cache gruppiert mit Status, I/O-`numErrors`, Temp und Deltas.
+- **SMART für alle Disks** (`SMART_SCOPE=all` Default): gruppiert, Standby ohne Spin-up, Kurzfassung in Pushover.
+- Config: `USHM_INVENTORY_ENABLED`, `DISK_ERROR_WARN`/`CRIT`; Historie `inventory.csv`.
+
+### Changed
+
+- Default `SMART_SCOPE=parity` → `all`.
+- Report-Abschnitte: „Disks / Parität“ und „SMART (alle Disks)“.
+
 ## [2.0.0] – 2026-11-11
 
 ### Added

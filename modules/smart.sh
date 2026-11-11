@@ -1,51 +1,54 @@
 #!/usr/bin/env bash
-# SMART Monitoring – Fokus Parity (parity + parity2), optional alle Disks
+# SMART Monitoring – alle Disks (Parity / Data / Cache), gruppiert
 # shellcheck disable=SC2034
 
 # Ergebnisse:
-# SMART_LINES[] / SMART_REPORT
-# Pro Disk: Health, Temp, Reallocated, Pending, Uncorrectable, CRC + Deltas
+# SMART_LINES[] / SMART_REPORT / SMART_OK_COUNT / SMART_STANDBY_COUNT / SMART_FAIL_COUNT
 
 ushm_smart_defaults() {
   USHM_SMART_ENABLED="${USHM_SMART_ENABLED:-true}"
-  # parity = nur Parity-Disks (Default, weckt nicht alle Array-Disks)
-  # all    = alle disks.ini-Disks mit device (außer flash)
-  SMART_SCOPE="${SMART_SCOPE:-parity}"
+  # all    = alle disks.ini-Disks mit device (außer flash) – Default
+  # parity = nur Parity-Disks (weniger Spin-ups)
+  SMART_SCOPE="${SMART_SCOPE:-all}"
   SMART_WARN="${SMART_WARN:-55}"
   SMART_CRIT="${SMART_CRIT:-65}"
-  # Absolute SMART-Werte: Warnung wenn ≥ (0 = schon bei 1 melden)
   SMART_REALLOC_WARN="${SMART_REALLOC_WARN:-1}"
   SMART_PENDING_WARN="${SMART_PENDING_WARN:-1}"
   SMART_UNCORR_WARN="${SMART_UNCORR_WARN:-1}"
   SMART_CRC_WARN="${SMART_CRC_WARN:-10}"
-  # Jede Erhöhung eines kritischen Attributs → mindestens Warnung
   SMART_DELTA_ALERT="${SMART_DELTA_ALERT:-true}"
 }
 
-# Disks für SMART: name\tdevice (ohne /dev/)
+# Disks für SMART: name\tdevice\ttype
 ushm_smart_target_list() {
-  local scope="${SMART_SCOPE:-parity}"
+  local scope="${SMART_SCOPE:-all}"
   local ini="/var/local/emhttp/disks.ini"
   [[ -f "$ini" ]] || return 1
 
   if [[ "${scope,,}" == "parity" ]]; then
-    # Bevorzugt Ergebnis aus Array-Check
     if (( ${#PARITY_NAMES[@]} > 0 )); then
       local i
       for i in "${!PARITY_NAMES[@]}"; do
-        [[ -n "${PARITY_DEVICES[$i]:-}" ]] && printf '%s\t%s\n' "${PARITY_NAMES[$i]}" "${PARITY_DEVICES[$i]}"
+        [[ -n "${PARITY_DEVICES[$i]:-}" ]] && printf '%s\t%s\tParity\n' "${PARITY_NAMES[$i]}" "${PARITY_DEVICES[$i]}"
       done
       return 0
     fi
-    ushm_array_list_parity 2>/dev/null | awk -F'\t' '{print $1"\t"$2}'
+    if declare -F ushm_array_list_parity >/dev/null; then
+      ushm_array_list_parity 2>/dev/null | awk -F'\t' '{print $1"\t"$2"\tParity"}'
+    fi
     return 0
   fi
 
-  # alle Disks mit device, ohne Flash
+  # alle Disks mit device, ohne Flash – Typ aus disks.ini
+  if declare -F ushm_array_list_disks >/dev/null; then
+    ushm_array_list_disks 2>/dev/null | awk -F'\t' '$3 != "" { print $1"\t"$3"\t"$2 }'
+    return 0
+  fi
+
   awk '
     /^\[/ {
       if (sec != "" && device != "" && tolower(typ) != "flash") {
-        printf "%s\t%s\n", (name!=""?name:sec), device
+        printf "%s\t%s\t%s\n", (name!=""?name:sec), device, typ
       }
       s=$0; gsub(/^\[|\]$/, "", s)
       sec=s; typ=""; name=""; device=""
@@ -59,12 +62,11 @@ ushm_smart_target_list() {
     }
     END {
       if (sec != "" && device != "" && tolower(typ) != "flash")
-        printf "%s\t%s\n", (name!=""?name:sec), device
+        printf "%s\t%s\t%s\n", (name!=""?name:sec), device, typ
     }
   ' "$ini"
 }
 
-# Extrahiert RAW_VALUE eines Attributs aus smartctl -A Text
 ushm_smart_attr_raw() {
   local text="$1" id="$2" name_pat="$3"
   awk -v id="$id" -v np="$name_pat" '
@@ -86,23 +88,31 @@ ushm_smart_temp_from_text() {
     echo "${t%%[^0-9]*}"
     return 0
   fi
-  # NVMe
   t=$(awk -F: '/Temperature:/ { gsub(/[^0-9]/,"",$2); if($2!=""){print $2; exit}}' <<<"$text")
   [[ -n "$t" ]] && echo "$t" && return 0
   echo ""
 }
 
+ushm_smart_section_label() {
+  case "${1,,}" in
+    parity) echo "Parity" ;;
+    data)   echo "Data" ;;
+    cache)  echo "Cache" ;;
+    *)      echo "${1:-Other}" ;;
+  esac
+}
+
 ushm_smart_probe_disk() {
-  # $1=name $2=device (sdb oder nvme0n1)
-  local name="$1" device="$2"
+  # $1=name $2=device $3=type
+  local name="$1" device="$2" typ="${3:-}"
   local devpath="/dev/${device}"
   [[ -b "$devpath" ]] || {
     ushm_warn "SMART ${name}: Gerät $devpath fehlt"
+    SMART_LINES+=("SKIP|${typ}|${name}|Gerät /dev/${device} fehlt")
     return 1
   }
 
   local out rc=0 health="?" standby=0
-  # -n standby: Disk nicht aufwecken; Exit-Bit 2 = standby
   rc=0
   out=$(smartctl -n standby -H -A "$devpath" 2>&1) || rc=$?
 
@@ -111,7 +121,8 @@ ushm_smart_probe_disk() {
   fi
 
   if (( standby == 1 )); then
-    SMART_LINES+=("${name} (/dev/${device}): Standby – SMART übersprungen (kein Spin-up)")
+    SMART_STANDBY_COUNT=$(( SMART_STANDBY_COUNT + 1 ))
+    SMART_LINES+=("STANDBY|${typ}|${name}|Standby – kein Spin-up")
     ushm_debug "SMART ${name}: standby"
     return 0
   fi
@@ -137,7 +148,6 @@ ushm_smart_probe_disk() {
   crc=$(ushm_smart_attr_raw "$out" 199 "UDMA_CRC_Error")
   temp=$(ushm_smart_temp_from_text "$out")
 
-  # Nur Ziffern am Anfang (RAW kann Zusatz haben)
   realloc=${realloc%%[^0-9]*}; realloc=${realloc:-0}
   pending=${pending%%[^0-9]*}; pending=${pending:-0}
   uncorr=${uncorr%%[^0-9]*}; uncorr=${uncorr:-0}
@@ -184,6 +194,7 @@ ushm_smart_probe_disk() {
     "temp=${temp}" \
     "health=${health}" \
     "device=${device}" \
+    "type=${typ}" \
     "timestamp=$(date -Iseconds)"
 
   local deltas=()
@@ -194,19 +205,22 @@ ushm_smart_probe_disk() {
   (( d_c > 0 )) && deltas+=("CRC+${d_c}")
   local delta_txt=""
   if (( have_prev == 0 )); then
-    delta_txt="  (Baseline gespeichert)"
+    delta_txt="  (Baseline)"
   elif (( ${#deltas[@]} > 0 )); then
     delta_txt="  Δ: $(IFS=,; echo "${deltas[*]}")"
   fi
 
-  local temp_txt="${temp:-?}°C"
-  SMART_LINES+=("${name} (/dev/${device}): ${health}  T=${temp_txt}  Realloc=${realloc}  Pending=${pending}  OfflineUnc=${uncorr}  CRC=${crc}${delta_txt}")
+  local temp_txt="${temp:-?}"
+  local detail="${health}  T=${temp_txt}°C  Realloc=${realloc}  Pending=${pending}  OfflineUnc=${uncorr}  CRC=${crc}${delta_txt}"
+  SMART_LINES+=("OK|${typ}|${name}|${detail}")
 
   if [[ "$health" == "FAILED" ]]; then
+    SMART_FAIL_COUNT=$(( SMART_FAIL_COUNT + 1 ))
     ushm_add_alert 2 "SMART" "${name}: SMART Health FAILED"
+  elif [[ "$health" == "PASSED" ]]; then
+    SMART_OK_COUNT=$(( SMART_OK_COUNT + 1 ))
   fi
 
-  # Temperatur
   if [[ "$temp" =~ ^[0-9]+$ ]]; then
     if (( temp >= SMART_CRIT )); then
       ushm_add_alert 2 "SMART" "${name}: Temperatur ${temp}°C ≥ ${SMART_CRIT}°C"
@@ -215,7 +229,6 @@ ushm_smart_probe_disk() {
     fi
   fi
 
-  # Absolute Schwellwerte (Disk kränkelt)
   if (( realloc >= SMART_REALLOC_WARN )); then
     ushm_add_alert 1 "SMART" "${name}: Reallocated_Sector_Ct=${realloc} (Disk zeigt umgelagerte Sektoren)"
   fi
@@ -232,7 +245,6 @@ ushm_smart_probe_disk() {
     ushm_add_alert 1 "SMART" "${name}: UDMA_CRC_Error_Count=${crc} (Kabel/Controller?)"
   fi
 
-  # Änderungen seit letztem Lauf
   if ushm_is_true "${SMART_DELTA_ALERT:-true}"; then
     if (( d_r > 0 )); then
       ushm_add_alert 2 "SMART" "${name}: Reallocated +${d_r} (jetzt ${realloc}) – Disk verschlechtert sich"
@@ -255,10 +267,55 @@ ushm_smart_probe_disk() {
   return 0
 }
 
+ushm_smart_format_report() {
+  # SMART_LINES: status|type|name|detail → gruppiert nach Typ
+  local summary="SMART Scope=${SMART_SCOPE} · OK=${SMART_OK_COUNT:-0}  Standby=${SMART_STANDBY_COUNT:-0}  Failed=${SMART_FAIL_COUNT:-0}"
+  local out_lines=("$summary")
+
+  if (( ${#SMART_LINES[@]} == 0 )); then
+    out_lines+=("(keine SMART-Daten)")
+    printf '%s\n' "${out_lines[@]}"
+    return 0
+  fi
+
+  # Sort: Parity, Data, Cache, then name
+  local sorted
+  sorted=$(printf '%s\n' "${SMART_LINES[@]}" | awk -F'|' '{
+    t=tolower($2)
+    r=(t=="parity"?1:(t=="data"?2:(t=="cache"?3:9)))
+    print r "|" $0
+  }' | sort -t'|' -k1,1n -k4,4 | cut -d'|' -f2-)
+
+  local cur=""
+  local status typ name detail
+  while IFS='|' read -r status typ name detail; do
+    [[ -z "$name" ]] && continue
+    local label
+    label=$(ushm_smart_section_label "$typ")
+    if [[ "$label" != "$cur" ]]; then
+      cur="$label"
+      out_lines+=("")
+      out_lines+=("--- ${label} ---")
+    fi
+    if [[ "$status" == "STANDBY" ]]; then
+      out_lines+=("  ${name}: Standby – SMART übersprungen")
+    elif [[ "$status" == "SKIP" ]]; then
+      out_lines+=("  ${name}: ${detail}")
+    else
+      out_lines+=("  ${name}: ${detail}")
+    fi
+  done <<<"$sorted"
+
+  printf '%s\n' "${out_lines[@]}"
+}
+
 ushm_check_smart() {
   ushm_smart_defaults
   SMART_LINES=()
   SMART_REPORT=""
+  SMART_OK_COUNT=0
+  SMART_STANDBY_COUNT=0
+  SMART_FAIL_COUNT=0
 
   if ! ushm_is_true "${USHM_SMART_ENABLED:-true}"; then
     ushm_debug "SMART-Modul deaktiviert (USHM_SMART_ENABLED=false)"
@@ -273,11 +330,6 @@ ushm_check_smart() {
     return 0
   fi
 
-  # Array-Hilfen laden falls SMART vor Array läuft
-  if ! declare -F ushm_array_list_parity >/dev/null; then
-    ushm_warn "Array-Modul nicht geladen – SMART Parity-Liste eingeschränkt"
-  fi
-
   local targets
   targets=$(ushm_smart_target_list 2>/dev/null) || true
   if [[ -z "$targets" ]]; then
@@ -286,16 +338,19 @@ ushm_check_smart() {
     return 0
   fi
 
-  local name device
-  while IFS=$'\t' read -r name device; do
+  # Sortiert abarbeiten
+  targets=$(printf '%s\n' "$targets" | awk -F'\t' '{
+    t=tolower($3)
+    r=(t=="parity"?1:(t=="data"?2:(t=="cache"?3:9)))
+    printf "%d\t%s\n", r, $0
+  }' | sort -t$'\t' -k1,1n -k2,2 | cut -f2-)
+
+  local name device typ
+  while IFS=$'\t' read -r name device typ; do
     [[ -z "$name" || -z "$device" ]] && continue
-    ushm_smart_probe_disk "$name" "$device" || true
+    ushm_smart_probe_disk "$name" "$device" "$typ" || true
   done <<<"$targets"
 
-  if (( ${#SMART_LINES[@]} == 0 )); then
-    SMART_REPORT="(keine SMART-Daten)"
-  else
-    SMART_REPORT=$(printf '%s\n' "${SMART_LINES[@]}")
-  fi
+  SMART_REPORT=$(ushm_smart_format_report)
   return 0
 }

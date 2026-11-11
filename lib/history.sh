@@ -74,6 +74,27 @@ ushm_history_write() {
     done
   fi
 
+  # Inventar-Änderungen
+  DISK_INVENTORY_ADDED=("${DISK_INVENTORY_ADDED[@]+"${DISK_INVENTORY_ADDED[@]}"}")
+  DISK_INVENTORY_REMOVED=("${DISK_INVENTORY_REMOVED[@]+"${DISK_INVENTORY_REMOVED[@]}"}")
+  DISK_INVENTORY_REPLACED=("${DISK_INVENTORY_REPLACED[@]+"${DISK_INVENTORY_REPLACED[@]}"}")
+  if (( ${#DISK_INVENTORY_ADDED[@]} > 0 || ${#DISK_INVENTORY_REMOVED[@]} > 0 || ${#DISK_INVENTORY_REPLACED[@]} > 0 )); then
+    local inv_hist="${hist_dir}/inventory.csv"
+    if [[ ! -f "$inv_hist" ]]; then
+      echo "timestamp,change,detail" >"$inv_hist"
+    fi
+    local d
+    for d in "${DISK_INVENTORY_ADDED[@]}"; do
+      printf '%s,added,"%s"\n' "$ts" "${d//\"/\'}" >>"$inv_hist"
+    done
+    for d in "${DISK_INVENTORY_REMOVED[@]}"; do
+      printf '%s,removed,"%s"\n' "$ts" "${d//\"/\'}" >>"$inv_hist"
+    done
+    for d in "${DISK_INVENTORY_REPLACED[@]}"; do
+      printf '%s,replaced,"%s"\n' "$ts" "${d//\"/\'}" >>"$inv_hist"
+    done
+  fi
+
   # SMART Snapshot (eine Zeile pro SMART_LINES-Eintrag grob; Detail in state/)
   if [[ -n "${SMART_REPORT:-}" && "$SMART_REPORT" != "(keine Daten)" && "$SMART_REPORT" != "(smartctl fehlt)" ]]; then
     local smart_hist="${hist_dir}/smart_${date_day}.csv"
